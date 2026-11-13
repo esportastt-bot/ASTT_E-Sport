@@ -13,8 +13,8 @@ export const MOCK_USERS: UserProfile[] = [
 ];
 
 export const MOCK_POLL: Poll = {
-  id: 'poll-2026-w46',
-  title: 'Entraînements Semaine 47 - Prépa Tournoi',
+  id: 'poll-2026-w47',
+  title: 'Entraînements Semaine 47 (du 16/11 au 22/11)',
   type: 'ASTT',
   periodType: '1_week',
   startDate: '2026-11-16',
@@ -28,32 +28,47 @@ export const MOCK_POLL: Poll = {
   excludedUsers: [],
   status: 'OPEN',
   slots: [
+    // Lundi : 2 créneaux distincts (comme l'exemple de l'utilisateur)
     {
       id: 'slot-1',
       dateStr: '2026-11-16',
       dayName: 'Lundi',
-      startTime: '20:30',
-      endTime: '21:50',
+      startTime: '18:00',
+      endTime: '19:20',
+      disponibles: ['usr_cap', 'usr_1', 'usr_2', 'usr_3', 'usr_4'], // 5 dispo
+      incertains: ['usr_5'],
+      indisponibles: ['usr_6', 'usr_7'],
+      selectedIds: ['usr_cap', 'usr_1', 'usr_2', 'usr_3', 'usr_4'],
+      waitlistIds: [],
+    },
+    {
+      id: 'slot-2',
+      dateStr: '2026-11-16',
+      dayName: 'Lundi',
+      startTime: '20:00',
+      endTime: '21:20',
       disponibles: ['usr_cap', 'usr_1', 'usr_2', 'usr_3', 'usr_4', 'usr_5', 'usr_6', 'usr_7', 'usr_8'], // 9 dispo -> EXCEEDED !
       incertains: [],
       indisponibles: [],
       selectedIds: ['usr_cap', 'usr_1', 'usr_2', 'usr_3', 'usr_4', 'usr_5', 'usr_6', 'usr_7'],
       waitlistIds: ['usr_8'],
     },
+    // Mardi : 1 créneau à 17:00
     {
-      id: 'slot-2',
+      id: 'slot-3',
       dateStr: '2026-11-17',
       dayName: 'Mardi',
-      startTime: '20:30',
-      endTime: '21:50',
+      startTime: '17:00',
+      endTime: '18:20',
       disponibles: ['usr_cap', 'usr_1', 'usr_3', 'usr_5'], // 4 dispo -> MIN_REACHED
       incertains: ['usr_2', 'usr_7'],
       indisponibles: ['usr_4'],
       selectedIds: ['usr_cap', 'usr_1', 'usr_3', 'usr_5'],
       waitlistIds: [],
     },
+    // Mercredi : 1 créneau
     {
-      id: 'slot-3',
+      id: 'slot-4',
       dateStr: '2026-11-18',
       dayName: 'Mercredi',
       startTime: '20:30',
@@ -64,20 +79,22 @@ export const MOCK_POLL: Poll = {
       selectedIds: [],
       waitlistIds: [],
     },
+    // Jeudi : 1 créneau
     {
-      id: 'slot-4',
+      id: 'slot-5',
       dateStr: '2026-11-19',
       dayName: 'Jeudi',
       startTime: '20:30',
       endTime: '21:50',
-      disponibles: ['usr_1', 'usr_2', 'usr_3', 'usr_4', 'usr_5', 'usr_6'], // 6 dispo -> VALIDATED
+      disponibles: ['usr_1', 'usr_2', 'usr_3', 'usr_4', 'usr_5', 'usr_6'], // 6 dispo
       incertains: ['usr_7'],
       indisponibles: ['usr_cap'],
       selectedIds: ['usr_1', 'usr_2', 'usr_3', 'usr_4', 'usr_5', 'usr_6'],
       waitlistIds: [],
     },
+    // Vendredi : 1 créneau
     {
-      id: 'slot-5',
+      id: 'slot-6',
       dateStr: '2026-11-20',
       dayName: 'Vendredi',
       startTime: '21:00',
