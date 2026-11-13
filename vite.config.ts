@@ -5,5 +5,7 @@ import { defineConfig } from 'vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: './', // Pour fonctionner sur GitHub Pages quel que soit le sous-chemin
+  // Dépôt GitHub : esportastt-bot/ASTT_E-Sport
+  // GitHub Pages sert sur https://esportastt-bot.github.io/ASTT_E-Sport/
+  base: '/ASTT_E-Sport/',
 })
