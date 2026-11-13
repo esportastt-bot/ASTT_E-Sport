@@ -7,6 +7,7 @@ import { DashboardScreen } from './components/screens/DashboardScreen';
 import { CreatePollWizard } from './components/screens/CreatePollWizard';
 import { MemberVoteScreen } from './components/screens/MemberVoteScreen';
 import { ResultsScreen } from './components/screens/ResultsScreen';
+import bgFond from './assets/fond.webp';
 
 export function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile>(MOCK_USERS[0]); // Alex (Capitaine) by default
@@ -40,6 +41,12 @@ export function App() {
       id: `poll-${Date.now()}`,
       title: pollData.title,
       type: pollData.trainingType,
+      startDate: pollData.startDate,
+      endDate: pollData.endDate,
+      deadline: pollData.deadline,
+      minParticipants: pollData.minParticipants,
+      maxParticipants: pollData.maxParticipants,
+      slots: pollData.slots,
     };
     setPolls([newPoll, ...polls]);
     setCurrentScreen('dashboard');
@@ -73,7 +80,16 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-16 md:pb-0">
+    <div
+      className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-16 md:pb-0"
+      style={{
+        backgroundImage: `linear-gradient(to bottom, rgba(2, 6, 23, 0.82), rgba(2, 6, 23, 0.94)), url(${bgFond})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundAttachment: 'fixed',
+      }}
+    >
       {/* Navigation bar with persona switcher */}
       {currentScreen !== 'login' && (
         <Navbar
