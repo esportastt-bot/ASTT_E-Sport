@@ -27,6 +27,46 @@ export function formatFRDate(date: Date): string {
   return `${d}/${m}/${y}`;
 }
 
+/** Formate une date YYYY-MM-DD ou ISO en JJ/MM/AAAA */
+export function formatShortFRDate(dateStr: string): string {
+  if (!dateStr) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [y, m, d] = dateStr.split('-');
+    return `${d}/${m}/${y}`;
+  }
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return formatFRDate(d);
+}
+
+/** Formate une date ISO en français (fuseau Europe/Paris), ex: "dimanche 22/11/2026 à 20:00" */
+export function formatFRDateTime(isoString: string): string {
+  if (!isoString) return 'Non définie';
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return isoString;
+
+  try {
+    const datePart = new Intl.DateTimeFormat('fr-FR', {
+      timeZone: 'Europe/Paris',
+      weekday: 'long',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(d);
+
+    const timePart = new Intl.DateTimeFormat('fr-FR', {
+      timeZone: 'Europe/Paris',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(d);
+
+    return `${datePart} à ${timePart}`;
+  } catch {
+    return isoString;
+  }
+}
+
 export function getWeekNumber(date: Date): number {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;

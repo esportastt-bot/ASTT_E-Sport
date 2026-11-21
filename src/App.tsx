@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { usePolls } from './contexts/PollsContext';
 import type { ResponseStatus } from './types';
@@ -10,25 +11,63 @@ import { MemberVoteScreen } from './components/screens/MemberVoteScreen';
 import { ResultsScreen } from './components/screens/ResultsScreen';
 import bgFond from './assets/fond.webp';
 
+type Screen = 'login' | 'dashboard' | 'create' | 'vote' | 'results' | 'profile';
+
 export function App() {
   const { userProfile, loading: authLoading } = useAuth();
-  const { polls, loading: pollsLoading, createNewPoll, removePoll, cancelExistingPoll, saveVotes } = usePolls();
-  const [currentScreen, setCurrentScreen] = useState<'login' | 'dashboard' | 'create' | 'vote' | 'results' | 'profile'>('dashboard');
+  const {
+    polls,
+    membersMap,
+    voterNames,
+    loading: pollsLoading,
+    createNewPoll,
+    removePoll,
+    cancelExistingPoll,
+    updateExistingPoll,
+    saveVotes,
+    updateSelection,
+  } = usePolls();
+
+  const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
   const [selectedPollId, setSelectedPollId] = useState<string | null>(null);
+  const [deepLinkPollId, setDeepLinkPollId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('poll');
+  });
 
-  // Redirection automatique vers login si non connecté
-  useEffect(() => {
-    if (!authLoading && !userProfile) {
-      setCurrentScreen('login');
-    } else if (!authLoading && userProfile && currentScreen === 'login') {
-      setCurrentScreen('dashboard');
+  // Dériver l'écran affiché pour éviter tout setState synchrone dans useEffect
+  const deepLinkMatch = Boolean(
+    deepLinkPollId && polls.some((p) => p.id === deepLinkPollId)
+  );
+  const effectivePollId = deepLinkMatch ? deepLinkPollId : selectedPollId;
+  const effectiveScreen: Screen = !userProfile
+    ? 'login'
+    : deepLinkMatch
+    ? 'vote'
+    : currentScreen === 'login'
+    ? 'dashboard'
+    : currentScreen;
+
+  const activePoll = polls.find((p) => p.id === effectivePollId) || polls[0] || null;
+
+  const clearDeepLinkUrl = () => {
+    if (deepLinkPollId) {
+      setDeepLinkPollId(null);
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('poll')) {
+        url.searchParams.delete('poll');
+        window.history.replaceState({}, '', url.pathname + url.search);
+      }
     }
-  }, [authLoading, userProfile, currentScreen]);
+  };
 
-  // Poll sélectionné pour voter ou voir les résultats
-  const activePoll = polls.find(p => p.id === selectedPollId) || polls[0] || null;
+  const navigateTo = (screen: Screen) => {
+    clearDeepLinkUrl();
+    setCurrentScreen(screen);
+  };
 
   const handleSelectPoll = (pollId: string, action: 'vote' | 'results' | 'edit') => {
+    clearDeepLinkUrl();
     setSelectedPollId(pollId);
     if (action === 'vote') setCurrentScreen('vote');
     else if (action === 'results') setCurrentScreen('results');
@@ -37,7 +76,7 @@ export function App() {
 
   const handleCreatePollPublish = async (pollData: any) => {
     await createNewPoll(pollData, pollData.slots || []);
-    setCurrentScreen('dashboard');
+    navigateTo('dashboard');
   };
 
   const handleSaveVotes = async (votes: Record<string, ResponseStatus>) => {
@@ -45,12 +84,12 @@ export function App() {
     await saveVotes(activePoll.id, votes);
   };
 
-  const currentUser = userProfile || {
-    id: 'usr_guest',
-    name: 'Visiteur',
-    avatar: '👤',
-    role: 'MEMBER' as const,
-    discordRoles: [],
+  const handleClosePoll = async (pollId: string) => {
+    await updateExistingPoll(pollId, { status: 'CLOSED' });
+  };
+
+  const handleReopenPoll = async (pollId: string) => {
+    await updateExistingPoll(pollId, { status: 'OPEN' });
   };
 
   return (
@@ -64,53 +103,73 @@ export function App() {
         backgroundAttachment: 'fixed',
       }}
     >
-      {/* Barre de navigation simplifiée (sans onglets redondants) */}
-      {currentScreen !== 'login' && userProfile && (
+      {/* Barre de navigation */}
+      {!authLoading && effectiveScreen !== 'login' && userProfile && (
         <Navbar
-          currentScreen={currentScreen}
-          setScreen={setCurrentScreen}
-          currentUser={currentUser}
+          currentScreen={effectiveScreen}
+          setScreen={navigateTo}
+          currentUser={userProfile}
         />
       )}
 
       {/* Main Content View */}
-      <main className="flex-1">
-        {currentScreen === 'login' && <LoginScreen />}
+      <main className="flex-1 flex flex-col">
+        {authLoading ? (
+          <div className="flex-1 flex items-center justify-center px-4">
+            <div className="flex flex-col items-center gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl px-8 py-6 shadow-2xl">
+              <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+              <p className="text-sm text-slate-300 font-medium">
+                Vérification de la connexion Discord...
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {effectiveScreen === 'login' && <LoginScreen />}
 
-        {currentScreen === 'dashboard' && userProfile && (
-          <DashboardScreen
-            currentUser={currentUser}
-            polls={polls}
-            loading={pollsLoading}
-            onSelectPoll={handleSelectPoll}
-            onCreatePoll={() => setCurrentScreen('create')}
-            onDeletePoll={removePoll}
-            onCancelPoll={cancelExistingPoll}
-          />
-        )}
+            {effectiveScreen === 'dashboard' && userProfile && (
+              <DashboardScreen
+                currentUser={userProfile}
+                polls={polls}
+                loading={pollsLoading}
+                onSelectPoll={handleSelectPoll}
+                onCreatePoll={() => navigateTo('create')}
+                onDeletePoll={removePoll}
+                onCancelPoll={cancelExistingPoll}
+                onClosePoll={handleClosePoll}
+                onReopenPoll={handleReopenPoll}
+              />
+            )}
 
-        {currentScreen === 'create' && userProfile && (
-          <CreatePollWizard
-            onCancel={() => setCurrentScreen('dashboard')}
-            onPublish={handleCreatePollPublish}
-          />
-        )}
+            {effectiveScreen === 'create' && userProfile && (
+              <CreatePollWizard
+                onCancel={() => navigateTo('dashboard')}
+                onPublish={handleCreatePollPublish}
+              />
+            )}
 
-        {currentScreen === 'vote' && userProfile && activePoll && (
-          <MemberVoteScreen
-            poll={activePoll}
-            currentUser={currentUser}
-            onSaveVotes={handleSaveVotes}
-            onBack={() => setCurrentScreen('dashboard')}
-          />
-        )}
+            {effectiveScreen === 'vote' && userProfile && activePoll && (
+              <MemberVoteScreen
+                key={activePoll.id}
+                poll={activePoll}
+                currentUser={userProfile}
+                onSaveVotes={handleSaveVotes}
+                onBack={() => navigateTo('dashboard')}
+              />
+            )}
 
-        {currentScreen === 'results' && userProfile && activePoll && (
-          <ResultsScreen
-            poll={activePoll}
-            currentUser={currentUser}
-            onBack={() => setCurrentScreen('dashboard')}
-          />
+            {effectiveScreen === 'results' && userProfile && activePoll && (
+              <ResultsScreen
+                key={activePoll.id}
+                poll={activePoll}
+                currentUser={userProfile}
+                membersMap={membersMap}
+                voterNames={voterNames}
+                onUpdateSelection={updateSelection}
+                onBack={() => navigateTo('dashboard')}
+              />
+            )}
+          </>
         )}
       </main>
     </div>

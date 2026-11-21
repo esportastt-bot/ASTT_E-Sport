@@ -11,6 +11,20 @@ export interface DiscordMember {
   nick: string | null;
 }
 
+export class DiscordExchangeError extends Error {
+  public readonly status: number;
+
+  constructor(status: number, details: string) {
+    super(`Discord token exchange failed (${status}): ${details}`);
+    this.name = 'DiscordExchangeError';
+    this.status = status;
+  }
+}
+
+const DISCORD_HEADERS = {
+  'User-Agent': 'ASTT-Planning-Auth/1.0',
+};
+
 /** Échange le code OAuth2 contre un access token Discord */
 export async function exchangeCode(
   code: string,
@@ -20,7 +34,10 @@ export async function exchangeCode(
 ): Promise<string> {
   const response = await fetch('https://discord.com/api/oauth2/token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      ...DISCORD_HEADERS,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
     body: new URLSearchParams({
       client_id: clientId,
       client_secret: clientSecret,
@@ -32,7 +49,7 @@ export async function exchangeCode(
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Discord token exchange failed: ${err}`);
+    throw new DiscordExchangeError(response.status, err);
   }
 
   const data = (await response.json()) as { access_token: string };
@@ -42,10 +59,16 @@ export async function exchangeCode(
 /** Récupère l'utilisateur Discord depuis son access token */
 export async function getDiscordUser(accessToken: string): Promise<DiscordUser> {
   const response = await fetch('https://discord.com/api/users/@me', {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: {
+      ...DISCORD_HEADERS,
+      Authorization: `Bearer ${accessToken}`,
+    },
   });
 
-  if (!response.ok) throw new Error('Failed to fetch Discord user');
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Failed to fetch Discord user (${response.status}): ${err}`);
+  }
   return response.json() as Promise<DiscordUser>;
 }
 
@@ -57,16 +80,29 @@ export async function getGuildMember(
   if (!guildId) return null;
 
   const response = await fetch(`https://discord.com/api/users/@me/guilds/${guildId}/member`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: {
+      ...DISCORD_HEADERS,
+      Authorization: `Bearer ${accessToken}`,
+    },
   });
 
   if (response.status === 404 || response.status === 403) return null; // Pas membre du serveur
-  if (!response.ok) throw new Error('Failed to fetch guild member');
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Failed to fetch guild member (${response.status}): ${err}`);
+  }
   return response.json() as Promise<DiscordMember>;
 }
 
-/** Génère l'URL d'avatar Discord */
+/** Génère l'URL d'avatar Discord (BigInt safe pour snowflakes 64 bits) */
 export function getAvatarUrl(user: DiscordUser): string {
-  if (!user.avatar) return `https://cdn.discordapp.com/embed/avatars/${parseInt(user.id, 10) % 5}.png`;
+  if (!user.avatar) {
+    try {
+      const idx = Number((BigInt(user.id) >> 22n) % 6n);
+      return `https://cdn.discordapp.com/embed/avatars/${idx}.png`;
+    } catch {
+      return 'https://cdn.discordapp.com/embed/avatars/0.png';
+    }
+  }
   return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.webp?size=128`;
 }

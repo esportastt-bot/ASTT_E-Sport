@@ -9,7 +9,8 @@ export interface ServiceAccount {
 
 /** Convertit une clé PEM en CryptoKey pour Web Crypto API */
 async function importPrivateKey(pemKey: string): Promise<CryptoKey> {
-  const keyBody = pemKey
+  const normalizedPem = pemKey.replace(/\\n/g, '\n');
+  const keyBody = normalizedPem
     .replace(/-----BEGIN PRIVATE KEY-----/g, '')
     .replace(/-----END PRIVATE KEY-----/g, '')
     .replace(/\s/g, '');
@@ -25,15 +26,19 @@ async function importPrivateKey(pemKey: string): Promise<CryptoKey> {
   );
 }
 
-/** Encode en base64url */
-function base64url(data: ArrayBuffer | string): string {
-  let str: string;
-  if (typeof data === 'string') {
-    str = btoa(data);
-  } else {
-    str = btoa(String.fromCharCode(...new Uint8Array(data)));
+/** Encode en base64url (UTF-8 safe pour les caractères accentués et emojis) */
+function base64url(data: ArrayBuffer | Uint8Array | string): string {
+  const bytes =
+    typeof data === 'string'
+      ? new TextEncoder().encode(data)
+      : data instanceof Uint8Array
+        ? data
+        : new Uint8Array(data);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
-  return str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
 /**

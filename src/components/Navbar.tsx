@@ -2,6 +2,7 @@ import React from 'react';
 import type { UserProfile } from '../types';
 import { PlusCircle, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { UserAvatar } from './UserAvatar';
 
 interface NavbarProps {
   currentScreen: 'login' | 'dashboard' | 'create' | 'vote' | 'results' | 'profile';
@@ -20,8 +21,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
         {/* Brand - Clique pour revenir au Tableau de bord */}
-        <div 
-          className="flex items-center gap-3 cursor-pointer group" 
+        <div
+          className="flex items-center gap-3 cursor-pointer group"
           onClick={() => setScreen('dashboard')}
           title="Retour aux sondages"
         >
@@ -49,14 +50,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {/* Profil utilisateur connecté */}
-          <div className="flex items-center gap-2 bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-xl text-xs">
-            <span className="text-base">{currentUser.avatar || '👤'}</span>
+          <div className="flex items-center gap-2 bg-slate-950/60 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs">
+            <UserAvatar avatar={currentUser.avatar} name={currentUser.name} size="sm" />
             <span className="font-medium text-white max-w-[120px] truncate">{currentUser.name}</span>
-            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-              isCaptain
-                ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-            }`}>
+            <span
+              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                isCaptain
+                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                  : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+              }`}
+            >
               {isCaptain ? 'Capitaine' : 'Joueur'}
             </span>
           </div>

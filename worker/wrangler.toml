@@ -5,7 +5,10 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 FIREBASE_PROJECT_ID = "astt-sondages-app"
-DISCORD_GUILD_ID = ""
+DISCORD_CLIENT_ID = "1573662733549707274"
+DISCORD_GUILD_ID = "1313249906751705250"
+DISCORD_OWNER_ID = "1313243809580060722"
+DISCORD_CAPTAIN_ROLE_IDS = "1313253443770650696"
 FRONTEND_URL = "https://esportastt-bot.github.io/ASTT_E-Sport"
 
 # Cron trigger : réconciliation et clôture toutes les 5 minutes

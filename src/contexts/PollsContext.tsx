@@ -1,158 +1,325 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Poll, ResponseStatus } from '../types';
-import { subscribeToPollsList, createPoll, deletePoll, cancelPoll, submitResponses, updateSlotSelection } from '../firebase/polls';
-import { MOCK_POLL } from '../mock/data';
+import {
+  subscribeToPollsList,
+  subscribeToResponses,
+  subscribeToPollSlots,
+  createPoll,
+  deletePoll,
+  cancelPoll,
+  submitResponses,
+  updateSlotSelection,
+  updatePoll,
+  type SlotVotesMap,
+  type PollSlotSelection,
+} from '../firebase/polls';
+import { subscribeToAllMembers, type MemberProfile } from '../firebase/members';
 import { useAuth } from './AuthContext';
 
 interface PollsContextType {
   polls: Poll[];
+  membersMap: Record<string, MemberProfile>;
+  voterNames: Record<string, string>;
   loading: boolean;
+  error: string | null;
   createNewPoll: (pollData: any, slots: any[]) => Promise<string>;
   removePoll: (pollId: string) => Promise<void>;
   cancelExistingPoll: (pollId: string) => Promise<void>;
+  updateExistingPoll: (
+    pollId: string,
+    changes: Partial<{
+      title: string;
+      deadline: string;
+      minParticipants: number;
+      maxParticipants: number;
+      status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+    }>
+  ) => Promise<void>;
   saveVotes: (pollId: string, votes: Record<string, ResponseStatus>) => Promise<void>;
-  updateSelection: (pollId: string, slotId: string, selectedIds: string[], waitlistIds: string[]) => Promise<void>;
+  updateSelection: (
+    pollId: string,
+    slotId: string,
+    selectedIds: string[],
+    waitlistIds: string[]
+  ) => Promise<void>;
 }
 
 const PollsContext = createContext<PollsContextType>({
   polls: [],
-  loading: true,
+  membersMap: {},
+  voterNames: {},
+  loading: false,
+  error: null,
   createNewPoll: async () => '',
   removePoll: async () => {},
   cancelExistingPoll: async () => {},
+  updateExistingPoll: async () => {},
   saveVotes: async () => {},
   updateSelection: async () => {},
 });
 
 export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { firebaseUser, userProfile } = useAuth();
-  const [polls, setPolls] = useState<Poll[]>(() => {
-    const saved = localStorage.getItem('astt_polls_cache');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {
-        return [MOCK_POLL];
-      }
-    }
-    return [MOCK_POLL];
-  });
-  const [loading, setLoading] = useState(false);
+  const [polls, setPolls] = useState<Poll[]>([]);
+  const [membersMap, setMembersMap] = useState<Record<string, MemberProfile>>({});
+  const [voterNames, setVoterNames] = useState<Record<string, string>>({});
+  const [loadedForUid, setLoadedForUid] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Sauvegarder dans le cache local
-  useEffect(() => {
-    localStorage.setItem('astt_polls_cache', JSON.stringify(polls));
-  }, [polls]);
+  // Souscriptions temps réel par sondage + caches pour éviter l'écrasement entre snapshots
+  const responsesUnsubsRef = useRef<Map<string, () => void>>(new Map());
+  const slotsUnsubsRef = useRef<Map<string, () => void>>(new Map());
+  const responsesCacheRef = useRef<Map<string, SlotVotesMap>>(new Map());
+  const slotsCacheRef = useRef<Map<string, PollSlotSelection[]>>(new Map());
 
-  // Synchronisation Firestore en temps réel dès que l'utilisateur est connecté
   useEffect(() => {
-    // Si pas d'utilisateur Firebase connecté, on reste sur les données locales sans bloquer l'UI
+    const cleanupAllSubListeners = () => {
+      responsesUnsubsRef.current.forEach((unsub) => unsub());
+      responsesUnsubsRef.current.clear();
+      slotsUnsubsRef.current.forEach((unsub) => unsub());
+      slotsUnsubsRef.current.clear();
+      responsesCacheRef.current.clear();
+      slotsCacheRef.current.clear();
+    };
+
     if (!firebaseUser) {
-      setLoading(false);
+      cleanupAllSubListeners();
       return;
     }
 
-    try {
-      const unsubscribe = subscribeToPollsList((firestorePolls) => {
-        if (firestorePolls && firestorePolls.length > 0) {
-          setPolls(firestorePolls);
+    let cancelled = false;
+
+    const unsubMembers = subscribeToAllMembers((members) => {
+      if (!cancelled) setMembersMap(members);
+    });
+
+    const unsubPolls = subscribeToPollsList(
+      (firestorePolls, initialVoterNames) => {
+        if (cancelled) return;
+
+        if (Object.keys(initialVoterNames).length > 0) {
+          setVoterNames((prev) => ({ ...prev, ...initialVoterNames }));
         }
-        setLoading(false);
-      });
-      return unsubscribe;
-    } catch (e) {
-      console.warn('Mode hors-ligne ou Firestore non connecté:', e);
-      setLoading(false);
-    }
+
+        const activeIds = new Set(firestorePolls.map((p) => p.id));
+
+        // Nettoyer les listeners des sondages supprimés
+        for (const [pid, unsub] of responsesUnsubsRef.current.entries()) {
+          if (!activeIds.has(pid)) {
+            unsub();
+            responsesUnsubsRef.current.delete(pid);
+            responsesCacheRef.current.delete(pid);
+          }
+        }
+        for (const [pid, unsub] of slotsUnsubsRef.current.entries()) {
+          if (!activeIds.has(pid)) {
+            unsub();
+            slotsUnsubsRef.current.delete(pid);
+            slotsCacheRef.current.delete(pid);
+          }
+        }
+
+        // Fusionner avec les caches temps réel déjà reçus
+        const mergedPolls = firestorePolls.map((poll) => {
+          const cachedSlots = slotsCacheRef.current.get(poll.id);
+          const cachedVotes = responsesCacheRef.current.get(poll.id);
+
+          const baseSlots = cachedSlots
+            ? cachedSlots.map((cs) => {
+                const existing = poll.slots.find((s) => s.id === cs.id);
+                return {
+                  id: cs.id,
+                  dateStr: cs.dateStr,
+                  dayName: cs.dayName,
+                  startTime: cs.startTime,
+                  endTime: cs.endTime,
+                  disponibles: existing?.disponibles || [],
+                  incertains: existing?.incertains || [],
+                  indisponibles: existing?.indisponibles || [],
+                  selectedIds: cs.selectedIds,
+                  waitlistIds: cs.waitlistIds,
+                };
+              })
+            : poll.slots;
+
+          const slotsWithVotes = cachedVotes
+            ? baseSlots.map((s) => {
+                const v = cachedVotes[s.id] || {
+                  disponibles: [],
+                  incertains: [],
+                  indisponibles: [],
+                };
+                return {
+                  ...s,
+                  disponibles: v.disponibles,
+                  incertains: v.incertains,
+                  indisponibles: v.indisponibles,
+                };
+              })
+            : baseSlots;
+
+          return { ...poll, slots: slotsWithVotes };
+        });
+
+        setPolls(mergedPolls);
+        setError(null);
+        setLoadedForUid(firebaseUser.uid);
+
+        // Souscrire aux réponses et aux créneaux de chaque sondage
+        for (const poll of firestorePolls) {
+          if (!responsesUnsubsRef.current.has(poll.id)) {
+            const unsubResp = subscribeToResponses(poll.id, (slotVotes, names) => {
+              if (cancelled) return;
+              responsesCacheRef.current.set(poll.id, slotVotes);
+              if (Object.keys(names).length > 0) {
+                setVoterNames((prev) => ({ ...prev, ...names }));
+              }
+              setPolls((prev) =>
+                prev.map((p) => {
+                  if (p.id !== poll.id) return p;
+                  return {
+                    ...p,
+                    slots: p.slots.map((s) => {
+                      const v = slotVotes[s.id] || {
+                        disponibles: [],
+                        incertains: [],
+                        indisponibles: [],
+                      };
+                      return {
+                        ...s,
+                        disponibles: v.disponibles,
+                        incertains: v.incertains,
+                        indisponibles: v.indisponibles,
+                      };
+                    }),
+                  };
+                })
+              );
+            });
+            responsesUnsubsRef.current.set(poll.id, unsubResp);
+          }
+
+          if (!slotsUnsubsRef.current.has(poll.id)) {
+            const unsubSlots = subscribeToPollSlots(poll.id, (updatedSlotSelections) => {
+              if (cancelled) return;
+              slotsCacheRef.current.set(poll.id, updatedSlotSelections);
+              setPolls((prev) =>
+                prev.map((p) => {
+                  if (p.id !== poll.id) return p;
+                  const cachedVotes = responsesCacheRef.current.get(poll.id);
+                  return {
+                    ...p,
+                    slots: updatedSlotSelections.map((cs) => {
+                      const prevSlot = p.slots.find((s) => s.id === cs.id);
+                      const v = cachedVotes?.[cs.id];
+                      return {
+                        id: cs.id,
+                        dateStr: cs.dateStr,
+                        dayName: cs.dayName,
+                        startTime: cs.startTime,
+                        endTime: cs.endTime,
+                        disponibles: v?.disponibles ?? prevSlot?.disponibles ?? [],
+                        incertains: v?.incertains ?? prevSlot?.incertains ?? [],
+                        indisponibles: v?.indisponibles ?? prevSlot?.indisponibles ?? [],
+                        selectedIds: cs.selectedIds,
+                        waitlistIds: cs.waitlistIds,
+                      };
+                    }),
+                  };
+                })
+              );
+            });
+            slotsUnsubsRef.current.set(poll.id, unsubSlots);
+          }
+        }
+      },
+      (err) => {
+        if (cancelled) return;
+        setError(err.message);
+        setLoadedForUid(firebaseUser.uid);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      unsubMembers();
+      unsubPolls();
+      cleanupAllSubListeners();
+    };
   }, [firebaseUser]);
 
+  const requireAuth = () => {
+    if (!firebaseUser || !userProfile) {
+      throw new Error('Vous devez être connecté avec Discord pour effectuer cette action.');
+    }
+  };
+
   const createNewPoll = async (pollData: any, slots: any[]): Promise<string> => {
-    const newId = `poll-${Date.now()}`;
-    const newPoll: Poll = {
-      id: newId,
+    requireAuth();
+
+    const payload = {
       title: pollData.title,
       type: pollData.trainingType || pollData.type,
-      periodType: '1_week',
+      periodType: '1_week' as const,
       startDate: pollData.startDate,
       endDate: pollData.endDate,
       deadline: pollData.deadline,
       minParticipants: pollData.minParticipants || 4,
       maxParticipants: pollData.maxParticipants || 8,
       discordChannel: pollData.discordChannel || '',
-      targetRoles: pollData.targetRoles || ['Joueur ASTT'],
-      targetUsers: [],
+      targetRoles: pollData.targetRoles || ['Membre'],
+      targetUsers: pollData.targetUsers || [],
       excludedUsers: pollData.excludedUsers || [],
-      status: 'OPEN',
-      slots: slots.map((s, idx) => ({
-        id: s.id || `slot-${idx}-${Date.now()}`,
-        dateStr: s.dateStr,
-        dayName: s.dayName,
-        startTime: s.startTime,
-        endTime: s.endTime,
-        disponibles: [],
-        incertains: [],
-        indisponibles: [],
-        selectedIds: [],
-        waitlistIds: [],
-      })),
+      status: 'OPEN' as const,
     };
 
-    // Mise à jour optimiste locale
-    setPolls(prev => [newPoll, ...prev]);
-
-    // Firestore si configuré
-    if (import.meta.env.VITE_FIREBASE_API_KEY) {
-      try {
-        const firestoreId = await createPoll(newPoll, slots);
-        return firestoreId;
-      } catch (err) {
-        console.error('Erreur Firestore createPoll:', err);
-      }
-    }
-    return newId;
+    const firestoreId = await createPoll(payload, slots);
+    return firestoreId;
   };
 
   const removePoll = async (pollId: string): Promise<void> => {
-    // Mise à jour locale immédiate
-    setPolls(prev => prev.filter(p => p.id !== pollId));
-
-    // Firestore si configuré
-    if (import.meta.env.VITE_FIREBASE_API_KEY) {
-      try {
-        await deletePoll(pollId);
-      } catch (err) {
-        console.error('Erreur Firestore deletePoll:', err);
-      }
-    }
+    requireAuth();
+    await deletePoll(pollId);
+    setPolls((prev) => prev.filter((p) => p.id !== pollId));
   };
 
   const cancelExistingPoll = async (pollId: string): Promise<void> => {
-    // Mise à jour locale immédiate
-    setPolls(prev => prev.map(p => p.id === pollId ? { ...p, status: 'CANCELLED' } : p));
+    requireAuth();
+    await cancelPoll(pollId);
+    setPolls((prev) => prev.map((p) => (p.id === pollId ? { ...p, status: 'CANCELLED' } : p)));
+  };
 
-    // Firestore si configuré
-    if (import.meta.env.VITE_FIREBASE_API_KEY) {
-      try {
-        await cancelPoll(pollId);
-      } catch (err) {
-        console.error('Erreur Firestore cancelPoll:', err);
-      }
-    }
+  const updateExistingPoll = async (
+    pollId: string,
+    changes: Partial<{
+      title: string;
+      deadline: string;
+      minParticipants: number;
+      maxParticipants: number;
+      status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+    }>
+  ): Promise<void> => {
+    requireAuth();
+    await updatePoll(pollId, changes);
+    setPolls((prev) =>
+      prev.map((p) => (p.id === pollId ? { ...p, ...changes } : p))
+    );
   };
 
   const saveVotes = async (pollId: string, votes: Record<string, ResponseStatus>): Promise<void> => {
+    requireAuth();
     if (!userProfile) return;
 
-    // Mise à jour locale immédiate
-    setPolls(prev =>
-      prev.map(poll => {
+    await submitResponses(pollId, userProfile.id, userProfile.name, votes);
+
+    setPolls((prev) =>
+      prev.map((poll) => {
         if (poll.id !== pollId) return poll;
-        const updatedSlots = poll.slots.map(slot => {
+        const updatedSlots = poll.slots.map((slot) => {
           const vote = votes[slot.id];
-          const newDispo = slot.disponibles.filter(id => id !== userProfile.id);
-          const newIncertain = slot.incertains.filter(id => id !== userProfile.id);
-          const newIndispo = slot.indisponibles.filter(id => id !== userProfile.id);
+          const newDispo = slot.disponibles.filter((id) => id !== userProfile.id);
+          const newIncertain = slot.incertains.filter((id) => id !== userProfile.id);
+          const newIndispo = slot.indisponibles.filter((id) => id !== userProfile.id);
 
           if (vote === 'DISPONIBLE') newDispo.push(userProfile.id);
           else if (vote === 'INCERTAIN') newIncertain.push(userProfile.id);
@@ -168,15 +335,6 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return { ...poll, slots: updatedSlots };
       })
     );
-
-    // Firestore si configuré
-    if (import.meta.env.VITE_FIREBASE_API_KEY) {
-      try {
-        await submitResponses(pollId, userProfile.id, userProfile.name, votes);
-      } catch (err) {
-        console.error('Erreur Firestore submitResponses:', err);
-      }
-    }
   };
 
   const updateSelection = async (
@@ -185,34 +343,39 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     selectedIds: string[],
     waitlistIds: string[]
   ): Promise<void> => {
-    setPolls(prev =>
-      prev.map(poll => {
+    requireAuth();
+    await updateSlotSelection(pollId, slotId, selectedIds, waitlistIds);
+
+    setPolls((prev) =>
+      prev.map((poll) => {
         if (poll.id !== pollId) return poll;
-        const updatedSlots = poll.slots.map(slot => {
-          if (slot.id !== slotId) return slot;
-          return { ...slot, selectedIds, waitlistIds };
-        });
-        return { ...poll, slots: updatedSlots };
+        return {
+          ...poll,
+          slots: poll.slots.map((slot) =>
+            slot.id === slotId ? { ...slot, selectedIds, waitlistIds } : slot
+          ),
+        };
       })
     );
-
-    if (import.meta.env.VITE_FIREBASE_API_KEY) {
-      try {
-        await updateSlotSelection(pollId, slotId, selectedIds, waitlistIds);
-      } catch (err) {
-        console.error('Erreur Firestore updateSlotSelection:', err);
-      }
-    }
   };
+
+  const visiblePolls = firebaseUser ? polls : [];
+  const visibleMembers = firebaseUser ? membersMap : {};
+  const visibleVoterNames = firebaseUser ? voterNames : {};
+  const isLoading = Boolean(firebaseUser && loadedForUid !== firebaseUser.uid);
 
   return (
     <PollsContext.Provider
       value={{
-        polls,
-        loading,
+        polls: visiblePolls,
+        membersMap: visibleMembers,
+        voterNames: visibleVoterNames,
+        loading: isLoading,
+        error,
         createNewPoll,
         removePoll,
         cancelExistingPoll,
+        updateExistingPoll,
         saveVotes,
         updateSelection,
       }}

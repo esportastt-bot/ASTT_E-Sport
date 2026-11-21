@@ -1,0 +1,19 @@
+{
+  "name": "ASTT Planning – Disponibilités E-Sport",
+  "short_name": "ASTT Planning",
+  "description": "Application de gestion des disponibilités et sondages d'entraînement de l'ASTT E-Sport",
+  "start_url": "/ASTT_E-Sport/",
+  "scope": "/ASTT_E-Sport/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "/ASTT_E-Sport/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

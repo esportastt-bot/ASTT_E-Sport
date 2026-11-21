@@ -1,6 +1,6 @@
 import {
   collection, doc, updateDoc, getDocs, setDoc,
-  query, where, orderBy, onSnapshot, serverTimestamp, Timestamp,
+  query, orderBy, onSnapshot, serverTimestamp, Timestamp,
   writeBatch
 } from 'firebase/firestore';
 import { db } from './config';
@@ -8,26 +8,74 @@ import type { Poll, TimeSlot, ResponseStatus } from '../types';
 
 const POLLS_COL = 'polls';
 
+export type SlotVotesMap = Record<
+  string,
+  { disponibles: string[]; incertains: string[]; indisponibles: string[] }
+>;
+
+export interface PollSlotSelection {
+  id: string;
+  dateStr: string;
+  dayName: string;
+  startTime: string;
+  endTime: string;
+  selectedIds: string[];
+  waitlistIds: string[];
+}
+
 // ─── Conversion Firestore → Poll ───────────────────────────────────────────
 
 function docToPoll(id: string, data: any): Poll {
   return {
     id,
-    title: data.title,
-    type: data.training_type,
+    title: data.title || 'Sondage sans titre',
+    type: data.training_type || 'ASTT',
     periodType: '1_week',
-    startDate: data.start_date,
-    endDate: data.end_date,
-    deadline: data.deadline?.toDate?.()?.toISOString() || data.deadline,
-    minParticipants: data.min_participants,
-    maxParticipants: data.max_participants,
+    startDate: data.start_date || '',
+    endDate: data.end_date || '',
+    deadline: data.deadline?.toDate?.()?.toISOString() || data.deadline || '',
+    minParticipants: Number(data.min_participants) || 4,
+    maxParticipants: Number(data.max_participants) || 8,
     discordChannel: data.discord_channel_id || '',
-    targetRoles: data.target_role_ids || [],
-    targetUsers: data.target_user_ids || [],
-    excludedUsers: data.excluded_user_ids || [],
-    status: data.status,
+    targetRoles: Array.isArray(data.target_role_ids) ? data.target_role_ids : [],
+    targetUsers: Array.isArray(data.target_user_ids) ? data.target_user_ids : [],
+    excludedUsers: Array.isArray(data.excluded_user_ids) ? data.excluded_user_ids : [],
+    status: data.status || 'OPEN',
     slots: [], // chargés séparément
   };
+}
+
+function parseResponsesDocs(
+  docs: Array<{ id: string; data: () => any }>
+): { slotVotes: SlotVotesMap; voterNames: Record<string, string> } {
+  const slotVotes: SlotVotesMap = {};
+  const voterNames: Record<string, string> = {};
+
+  docs.forEach((docSnap) => {
+    const data = docSnap.data();
+    const uid = data.discord_id || docSnap.id;
+    if (data.display_name) {
+      voterNames[uid] = data.display_name;
+    }
+
+    const slotResponses: Record<string, ResponseStatus> = data.slot_responses || {};
+    Object.entries(slotResponses).forEach(([slotId, status]) => {
+      if (!slotVotes[slotId]) {
+        slotVotes[slotId] = { disponibles: [], incertains: [], indisponibles: [] };
+      }
+      if (status === 'DISPONIBLE') slotVotes[slotId].disponibles.push(uid);
+      else if (status === 'INCERTAIN') slotVotes[slotId].incertains.push(uid);
+      else if (status === 'INDISPONIBLE') slotVotes[slotId].indisponibles.push(uid);
+    });
+  });
+
+  return { slotVotes, voterNames };
+}
+
+function sortSlots(slots: TimeSlot[]): TimeSlot[] {
+  return [...slots].sort(
+    (a, b) => a.dateStr.localeCompare(b.dateStr) || a.startTime.localeCompare(b.startTime)
+  );
 }
 
 // ─── POLLS CRUD ────────────────────────────────────────────────────────────
@@ -39,6 +87,11 @@ export async function createPoll(
 ): Promise<string> {
   const batch = writeBatch(db);
 
+  const parsedDeadline = new Date(pollData.deadline);
+  if (Number.isNaN(parsedDeadline.getTime())) {
+    throw new Error('Date limite invalide.');
+  }
+
   // Document principal
   const pollRef = doc(collection(db, POLLS_COL));
   batch.set(pollRef, {
@@ -46,13 +99,13 @@ export async function createPoll(
     training_type: pollData.type,
     start_date: pollData.startDate,
     end_date: pollData.endDate,
-    deadline: Timestamp.fromDate(new Date(pollData.deadline)),
+    deadline: Timestamp.fromDate(parsedDeadline),
     min_participants: pollData.minParticipants,
     max_participants: pollData.maxParticipants,
-    discord_channel_id: pollData.discordChannel,
-    target_role_ids: pollData.targetRoles,
-    target_user_ids: pollData.targetUsers,
-    excluded_user_ids: pollData.excludedUsers,
+    discord_channel_id: pollData.discordChannel || '',
+    target_role_ids: pollData.targetRoles || [],
+    target_user_ids: pollData.targetUsers || [],
+    excluded_user_ids: pollData.excludedUsers || [],
     status: 'OPEN',
     reminder_sent: false,
     closed_notified: false,
@@ -79,50 +132,66 @@ export async function createPoll(
   return pollRef.id;
 }
 
-/** Écoute en temps réel la liste des sondages ouverts */
+/** Écoute en temps réel la liste complète des sondages (ouverts, clôturés, annulés) */
 export function subscribeToPollsList(
-  callback: (polls: Poll[]) => void
+  callback: (polls: Poll[], voterNames: Record<string, string>) => void,
+  onError?: (err: Error) => void
 ): () => void {
-  const q = query(
-    collection(db, POLLS_COL),
-    where('status', 'in', ['OPEN', 'CLOSED']),
-    orderBy('created_at', 'desc')
-  );
+  const q = query(collection(db, POLLS_COL), orderBy('created_at', 'desc'));
 
   return onSnapshot(
     q,
     async (snapshot) => {
       try {
-        const polls: Poll[] = [];
-        for (const docSnap of snapshot.docs) {
-          const poll = docToPoll(docSnap.id, docSnap.data());
-          // Charger les créneaux
-          const slotsSnap = await getDocs(
-            query(collection(db, POLLS_COL, docSnap.id, 'slots'), orderBy('date_str'), orderBy('start_time'))
-          );
-          poll.slots = slotsSnap.docs.map(s => ({
-            id: s.id,
-            dateStr: s.data().date_str,
-            dayName: s.data().day_name,
-            startTime: s.data().start_time,
-            endTime: s.data().end_time,
-            disponibles: [],
-            incertains: [],
-            indisponibles: [],
-            selectedIds: s.data().selected_user_ids || [],
-            waitlistIds: s.data().waitlist_user_ids || [],
-          }));
-          polls.push(poll);
-        }
-        callback(polls);
-      } catch (err) {
-        console.warn('Erreur traitement documents Firestore:', err);
-        callback([]);
+        const allVoterNames: Record<string, string> = {};
+
+        const polls = await Promise.all(
+          snapshot.docs.map(async (docSnap) => {
+            const poll = docToPoll(docSnap.id, docSnap.data());
+
+            const [slotsSnap, responsesSnap] = await Promise.all([
+              getDocs(collection(db, POLLS_COL, docSnap.id, 'slots')),
+              getDocs(collection(db, POLLS_COL, docSnap.id, 'responses')),
+            ]);
+
+            const { slotVotes, voterNames } = parseResponsesDocs(responsesSnap.docs);
+            Object.assign(allVoterNames, voterNames);
+
+            const mappedSlots: TimeSlot[] = slotsSnap.docs.map((s) => {
+              const d = s.data();
+              const votes = slotVotes[s.id] || {
+                disponibles: [],
+                incertains: [],
+                indisponibles: [],
+              };
+              return {
+                id: s.id,
+                dateStr: d.date_str || '',
+                dayName: d.day_name || '',
+                startTime: d.start_time || '',
+                endTime: d.end_time || '',
+                disponibles: votes.disponibles,
+                incertains: votes.incertains,
+                indisponibles: votes.indisponibles,
+                selectedIds: Array.isArray(d.selected_user_ids) ? d.selected_user_ids : [],
+                waitlistIds: Array.isArray(d.waitlist_user_ids) ? d.waitlist_user_ids : [],
+              };
+            });
+
+            poll.slots = sortSlots(mappedSlots);
+            return poll;
+          })
+        );
+
+        callback(polls, allVoterNames);
+      } catch (err: any) {
+        console.error('Erreur traitement documents Firestore:', err);
+        onError?.(err instanceof Error ? err : new Error(String(err)));
       }
     },
     (err) => {
       console.warn('Firestore snapshot non autorisé ou hors-ligne:', err.message);
-      callback([]);
+      onError?.(err);
     }
   );
 }
@@ -130,29 +199,47 @@ export function subscribeToPollsList(
 /** Écoute en temps réel les réponses d'un sondage */
 export function subscribeToResponses(
   pollId: string,
-  callback: (slotResponses: Record<string, { disponibles: string[]; incertains: string[]; indisponibles: string[] }>) => void
+  callback: (slotResponses: SlotVotesMap, voterNames: Record<string, string>) => void
 ): () => void {
   return onSnapshot(
     collection(db, POLLS_COL, pollId, 'responses'),
     (snapshot) => {
-      const result: Record<string, { disponibles: string[]; incertains: string[]; indisponibles: string[] }> = {};
+      const { slotVotes, voterNames } = parseResponsesDocs(snapshot.docs);
+      callback(slotVotes, voterNames);
+    },
+    (err) => {
+      console.warn(`Erreur snapshot réponses (${pollId}):`, err.message);
+    }
+  );
+}
 
-      snapshot.docs.forEach(docSnap => {
-        const data = docSnap.data();
-        const slotResponses: Record<string, ResponseStatus> = data.slot_responses || {};
-
-        Object.entries(slotResponses).forEach(([slotId, status]) => {
-          if (!result[slotId]) {
-            result[slotId] = { disponibles: [], incertains: [], indisponibles: [] };
-          }
-          const uid = docSnap.id; // discord_id = auth uid
-          if (status === 'DISPONIBLE') result[slotId].disponibles.push(uid);
-          else if (status === 'INCERTAIN') result[slotId].incertains.push(uid);
-          else if (status === 'INDISPONIBLE') result[slotId].indisponibles.push(uid);
-        });
+/** Écoute en temps réel les créneaux d'un sondage (titulaires / liste d'attente) */
+export function subscribeToPollSlots(
+  pollId: string,
+  callback: (slots: PollSlotSelection[]) => void
+): () => void {
+  return onSnapshot(
+    collection(db, POLLS_COL, pollId, 'slots'),
+    (snapshot) => {
+      const slots: PollSlotSelection[] = snapshot.docs.map((s) => {
+        const d = s.data();
+        return {
+          id: s.id,
+          dateStr: d.date_str || '',
+          dayName: d.day_name || '',
+          startTime: d.start_time || '',
+          endTime: d.end_time || '',
+          selectedIds: Array.isArray(d.selected_user_ids) ? d.selected_user_ids : [],
+          waitlistIds: Array.isArray(d.waitlist_user_ids) ? d.waitlist_user_ids : [],
+        };
       });
-
-      callback(result);
+      slots.sort(
+        (a, b) => a.dateStr.localeCompare(b.dateStr) || a.startTime.localeCompare(b.startTime)
+      );
+      callback(slots);
+    },
+    (err) => {
+      console.warn(`Erreur snapshot créneaux (${pollId}):`, err.message);
     }
   );
 }
@@ -165,28 +252,29 @@ export async function submitResponses(
   votes: Record<string, ResponseStatus>
 ): Promise<void> {
   const responseRef = doc(db, POLLS_COL, pollId, 'responses', userId);
-  await updateDoc(responseRef, {
-    display_name: displayName,
-    slot_responses: votes,
-    submitted_at: serverTimestamp(),
-  }).catch(async () => {
-    // Document n'existe pas encore → créer
-    await setDoc(responseRef, {
+  await setDoc(
+    responseRef,
+    {
       discord_id: userId,
       display_name: displayName,
       slot_responses: votes,
       submitted_at: serverTimestamp(),
-    });
-  });
+    },
+    { merge: true }
+  );
 
   // Marquer le membre comme ayant répondu
   const memberRef = doc(db, POLLS_COL, pollId, 'members', userId);
-  await setDoc(memberRef, {
-    discord_id: userId,
-    display_name: displayName,
-    has_submitted: true,
-    last_viewed_at: serverTimestamp(),
-  }, { merge: true });
+  await setDoc(
+    memberRef,
+    {
+      discord_id: userId,
+      display_name: displayName,
+      has_submitted: true,
+      last_viewed_at: serverTimestamp(),
+    },
+    { merge: true }
+  );
 }
 
 /** Annuler un sondage (status → CANCELLED) */
@@ -199,13 +287,12 @@ export async function cancelPoll(pollId: string): Promise<void> {
 
 /** Supprimer définitivement un sondage et toutes ses données */
 export async function deletePoll(pollId: string): Promise<void> {
-  // Supprimer les sous-collections puis le document principal
   const subCols = ['slots', 'responses', 'members'];
   const batch = writeBatch(db);
 
   for (const col of subCols) {
     const snap = await getDocs(collection(db, POLLS_COL, pollId, col));
-    snap.docs.forEach(d => batch.delete(d.ref));
+    snap.docs.forEach((d) => batch.delete(d.ref));
   }
 
   batch.delete(doc(db, POLLS_COL, pollId));
@@ -225,7 +312,7 @@ export async function updateSlotSelection(
   });
 }
 
-/** Modifier les informations d'un sondage ouvert */
+/** Modifier les informations d'un sondage */
 export async function updatePoll(
   pollId: string,
   changes: Partial<{
@@ -237,10 +324,14 @@ export async function updatePoll(
   }>
 ): Promise<void> {
   const firestoreData: Record<string, any> = { updated_at: serverTimestamp() };
-  if (changes.title) firestoreData.title = changes.title;
-  if (changes.deadline) firestoreData.deadline = Timestamp.fromDate(new Date(changes.deadline));
-  if (changes.minParticipants) firestoreData.min_participants = changes.minParticipants;
-  if (changes.maxParticipants) firestoreData.max_participants = changes.maxParticipants;
-  if (changes.status) firestoreData.status = changes.status;
+  if (changes.title !== undefined) firestoreData.title = changes.title;
+  if (changes.deadline !== undefined) {
+    const d = new Date(changes.deadline);
+    if (Number.isNaN(d.getTime())) throw new Error('Date limite invalide.');
+    firestoreData.deadline = Timestamp.fromDate(d);
+  }
+  if (changes.minParticipants !== undefined) firestoreData.min_participants = changes.minParticipants;
+  if (changes.maxParticipants !== undefined) firestoreData.max_participants = changes.maxParticipants;
+  if (changes.status !== undefined) firestoreData.status = changes.status;
   await updateDoc(doc(db, POLLS_COL, pollId), firestoreData);
 }
