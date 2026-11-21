@@ -6,7 +6,7 @@ const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'https://astt-auth.YOUR_SU
 
 /** Redirige vers Discord OAuth2 */
 export function loginWithDiscord(): void {
-  const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID;
+  const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID || '1398678314713092228';
   const redirectUri = encodeURIComponent(`${WORKER_URL}/auth/discord/callback`);
   const scope = encodeURIComponent('identify guilds.members.read');
   const state = btoa(window.location.href); // Pour retourner à la bonne page après login

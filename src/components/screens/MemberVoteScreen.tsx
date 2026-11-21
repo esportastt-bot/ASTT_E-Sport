@@ -2,19 +2,21 @@ import React, { useState } from 'react';
 import type { Poll, UserProfile, ResponseStatus } from '../../types';
 import { 
   CheckCircle2, HelpCircle, XCircle, Clock, Calendar, 
-  Sparkles, AlertCircle, Save 
+  Sparkles, AlertCircle, Save, ArrowLeft 
 } from 'lucide-react';
 
 interface MemberVoteScreenProps {
   poll: Poll;
   currentUser: UserProfile;
   onSaveVotes: (votes: Record<string, ResponseStatus>) => void;
+  onBack?: () => void;
 }
 
 export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
   poll,
   currentUser,
   onSaveVotes,
+  onBack,
 }) => {
   // Initialize local votes from poll slots
   const [votes, setVotes] = useState<Record<string, ResponseStatus>>(() => {
@@ -55,6 +57,17 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
       
+      {/* Back to dashboard button */}
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition group mb-1"
+        >
+          <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition" />
+          <span>Retour aux sondages</span>
+        </button>
+      )}
+
       {/* Header Info */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">

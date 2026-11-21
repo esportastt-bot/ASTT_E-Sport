@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { usePolls } from './contexts/PollsContext';
 import type { ResponseStatus } from './types';
@@ -11,26 +11,22 @@ import { ResultsScreen } from './components/screens/ResultsScreen';
 import bgFond from './assets/fond.webp';
 
 export function App() {
-  const { userProfile, loginAsDemoUser } = useAuth();
-  const { polls, loading, createNewPoll, removePoll, cancelExistingPoll, saveVotes } = usePolls();
+  const { userProfile, loading: authLoading } = useAuth();
+  const { polls, loading: pollsLoading, createNewPoll, removePoll, cancelExistingPoll, saveVotes } = usePolls();
   const [currentScreen, setCurrentScreen] = useState<'login' | 'dashboard' | 'create' | 'vote' | 'results' | 'profile'>('dashboard');
   const [selectedPollId, setSelectedPollId] = useState<string | null>(null);
 
+  // Redirection automatique vers login si non connecté
+  useEffect(() => {
+    if (!authLoading && !userProfile) {
+      setCurrentScreen('login');
+    } else if (!authLoading && userProfile && currentScreen === 'login') {
+      setCurrentScreen('dashboard');
+    }
+  }, [authLoading, userProfile, currentScreen]);
+
   // Poll sélectionné pour voter ou voir les résultats
   const activePoll = polls.find(p => p.id === selectedPollId) || polls[0] || null;
-
-  const toggleUserRole = () => {
-    if (!userProfile) {
-      loginAsDemoUser(true);
-      return;
-    }
-    loginAsDemoUser(userProfile.role !== 'CAPTAIN');
-  };
-
-  const handleLogin = (asCaptain: boolean) => {
-    loginAsDemoUser(asCaptain);
-    setCurrentScreen('dashboard');
-  };
 
   const handleSelectPoll = (pollId: string, action: 'vote' | 'results' | 'edit') => {
     setSelectedPollId(pollId);
@@ -59,7 +55,7 @@ export function App() {
 
   return (
     <div
-      className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-16 md:pb-0"
+      className="min-h-screen bg-slate-950 text-slate-100 flex flex-col"
       style={{
         backgroundImage: `linear-gradient(to bottom, rgba(2, 6, 23, 0.82), rgba(2, 6, 23, 0.94)), url(${bgFond})`,
         backgroundSize: 'cover',
@@ -68,25 +64,24 @@ export function App() {
         backgroundAttachment: 'fixed',
       }}
     >
-      {/* Navigation bar with persona switcher */}
-      {currentScreen !== 'login' && (
+      {/* Barre de navigation simplifiée (sans onglets redondants) */}
+      {currentScreen !== 'login' && userProfile && (
         <Navbar
           currentScreen={currentScreen}
           setScreen={setCurrentScreen}
           currentUser={currentUser}
-          toggleUserRole={toggleUserRole}
         />
       )}
 
       {/* Main Content View */}
       <main className="flex-1">
-        {currentScreen === 'login' && <LoginScreen onLogin={handleLogin} />}
+        {currentScreen === 'login' && <LoginScreen />}
 
-        {currentScreen === 'dashboard' && (
+        {currentScreen === 'dashboard' && userProfile && (
           <DashboardScreen
             currentUser={currentUser}
             polls={polls}
-            loading={loading}
+            loading={pollsLoading}
             onSelectPoll={handleSelectPoll}
             onCreatePoll={() => setCurrentScreen('create')}
             onDeletePoll={removePoll}
@@ -94,25 +89,27 @@ export function App() {
           />
         )}
 
-        {currentScreen === 'create' && (
+        {currentScreen === 'create' && userProfile && (
           <CreatePollWizard
             onCancel={() => setCurrentScreen('dashboard')}
             onPublish={handleCreatePollPublish}
           />
         )}
 
-        {currentScreen === 'vote' && activePoll && (
+        {currentScreen === 'vote' && userProfile && activePoll && (
           <MemberVoteScreen
             poll={activePoll}
             currentUser={currentUser}
             onSaveVotes={handleSaveVotes}
+            onBack={() => setCurrentScreen('dashboard')}
           />
         )}
 
-        {currentScreen === 'results' && activePoll && (
+        {currentScreen === 'results' && userProfile && activePoll && (
           <ResultsScreen
             poll={activePoll}
             currentUser={currentUser}
+            onBack={() => setCurrentScreen('dashboard')}
           />
         )}
       </main>

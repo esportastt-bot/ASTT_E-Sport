@@ -219,20 +219,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80">
                   <button
                     onClick={() => onSelectPoll(poll.id, 'vote')}
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20"
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20 active:scale-95"
                   >
                     <span>{userResponded ? 'Modifier mes réponses' : 'Répondre'}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
 
-                  {isCaptain && (
-                    <button
-                      onClick={() => onSelectPoll(poll.id, 'results')}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium py-2.5 px-3 rounded-xl transition border border-slate-700 flex items-center gap-1"
-                    >
-                      <span>Résultats</span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => onSelectPoll(poll.id, 'results')}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium py-2.5 px-3.5 rounded-xl transition border border-slate-700 hover:border-slate-600 flex items-center gap-1"
+                  >
+                    <span>Résultats</span>
+                  </button>
                 </div>
               </div>
             );
@@ -266,14 +264,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {isCaptain && (
-                    <button
-                      onClick={() => onSelectPoll(poll.id, 'results')}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700"
-                    >
-                      Résultats
-                    </button>
-                  )}
+                  <button
+                    onClick={() => onSelectPoll(poll.id, 'results')}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700 text-xs transition"
+                  >
+                    Résultats
+                  </button>
                   {isCaptain && (
                     <button
                       onClick={() => setPollToDelete(poll)}

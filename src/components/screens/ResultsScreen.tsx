@@ -2,18 +2,20 @@ import React, { useState } from 'react';
 import type { Poll, UserProfile, TimeSlot } from '../../types';
 import { 
   Trophy, AlertTriangle, CheckCircle, Clock, 
-  ChevronDown, ChevronUp, UserMinus, UserCheck, Shield
+  ChevronDown, ChevronUp, UserMinus, UserCheck, Shield, ArrowLeft
 } from 'lucide-react';
 import { MOCK_USERS } from '../../mock/data';
 
 interface ResultsScreenProps {
   poll: Poll;
   currentUser: UserProfile;
+  onBack?: () => void;
 }
 
 export const ResultsScreen: React.FC<ResultsScreenProps> = ({
   poll,
   currentUser,
+  onBack,
 }) => {
   const isCaptain = currentUser.role === 'CAPTAIN';
 
@@ -71,6 +73,17 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
       
+      {/* Back to dashboard button */}
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition group mb-1"
+        >
+          <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition" />
+          <span>Retour aux sondages</span>
+        </button>
+      )}
+
       {/* Header */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
