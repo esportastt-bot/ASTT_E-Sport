@@ -1,20 +1,32 @@
-import { exchangeCode, getDiscordUser, getGuildMember, getAvatarUrl, DiscordExchangeError } from './discord';
-import { createFirebaseCustomToken, type ServiceAccount } from './firebase';
+import {
+  exchangeCode,
+  getDiscordUser,
+  getGuildMember,
+  getGuildRoles,
+  getAllGuildMembers,
+  getAvatarUrl,
+  DiscordExchangeError,
+} from './discord';
+import {
+  createFirebaseCustomToken,
+  verifyFirebaseIdToken,
+  type ServiceAccount,
+} from './firebase';
 
 export interface Env {
   DISCORD_CLIENT_ID: string;
   DISCORD_CLIENT_SECRET: string;
+  DISCORD_BOT_TOKEN?: string;
   FIREBASE_SERVICE_ACCOUNT_JSON: string;
   FIREBASE_PROJECT_ID: string;
   DISCORD_GUILD_ID: string;
   DISCORD_OWNER_ID?: string;
+  DISCORD_ADMIN_ROLE_IDS?: string;
   DISCORD_CAPTAIN_ROLE_IDS?: string;
   FRONTEND_URL: string;
 }
 
-const CAPTAIN_KEYWORD_ROLES = ['capitaine', 'captain', 'admin', 'staff', 'coach'];
-
-const GUILD_ROLE_NAMES: Record<string, string> = {
+const FALLBACK_GUILD_ROLE_NAMES: Record<string, string> = {
   '1313253443770650696': 'Admin',
   '1402755374519423086': 'Membre',
   '1402755537862660106': 'Débutant',
@@ -27,6 +39,47 @@ const GUILD_ROLE_NAMES: Record<string, string> = {
   '1481389828879683584': '>>KSG',
 };
 
+function getCorsHeaders(request: Request, env: Env): Record<string, string> {
+  let defaultOrigin = '*';
+  try {
+    defaultOrigin = new URL(env.FRONTEND_URL).origin;
+  } catch {
+    defaultOrigin = '*';
+  }
+
+  const reqOrigin = request.headers.get('Origin') || '';
+  let allowedOrigin = defaultOrigin;
+
+  if (reqOrigin) {
+    try {
+      const parsed = new URL(reqOrigin);
+      const isLocal =
+        parsed.protocol === 'http:' &&
+        (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+      if (reqOrigin === defaultOrigin || isLocal) {
+        allowedOrigin = reqOrigin;
+      }
+    } catch {
+      // keep defaultOrigin
+    }
+  }
+
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    Vary: 'Origin',
+  };
+}
+
+function getAdminRoleIds(env: Env): string[] {
+  const raw = env.DISCORD_ADMIN_ROLE_IDS || env.DISCORD_CAPTAIN_ROLE_IDS || '';
+  return raw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 /** Décode un state base64url (ou base64 classique) et valide que l'URL cible est autorisée */
 function decodeTargetUrl(state: string | null, fallbackUrl: string): URL {
   const safeFallback = new URL(fallbackUrl);
@@ -36,7 +89,6 @@ function decodeTargetUrl(state: string | null, fallbackUrl: string): URL {
   if (!state) return safeFallback;
 
   try {
-    // Support base64url et base64 standard (+ possible espace si non encodé URL)
     const normalized = state.replace(/ /g, '+').replace(/-/g, '+').replace(/_/g, '/');
     const padLen = (4 - (normalized.length % 4)) % 4;
     const padded = normalized + '='.repeat(padLen);
@@ -47,7 +99,6 @@ function decodeTargetUrl(state: string | null, fallbackUrl: string): URL {
       bytes[i] = binary.charCodeAt(i);
     }
     let decoded = new TextDecoder().decode(bytes);
-    // Rétrocompatibilité avec d'anciens states encodés via encodeURIComponent
     if (!decoded.startsWith('http://') && !decoded.startsWith('https://')) {
       decoded = decodeURIComponent(decoded);
     }
@@ -74,20 +125,7 @@ function decodeTargetUrl(state: string | null, fallbackUrl: string): URL {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-
-    const allowedOrigin = (() => {
-      try {
-        return new URL(env.FRONTEND_URL).origin;
-      } catch {
-        return '*';
-      }
-    })();
-
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': allowedOrigin,
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    };
+    const corsHeaders = getCorsHeaders(request, env);
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
@@ -104,9 +142,92 @@ export default {
             project: env.FIREBASE_PROJECT_ID,
             discordConfigured: Boolean(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET),
             firebaseConfigured: Boolean(env.FIREBASE_SERVICE_ACCOUNT_JSON),
+            botDirectoryConfigured: Boolean(env.DISCORD_BOT_TOKEN),
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
+      }
+
+      // ── Annuaire complet des rôles et membres du serveur Discord ASTT ────
+      if (url.pathname === '/api/discord/guild-directory' && request.method === 'GET') {
+        const authHeader = request.headers.get('Authorization') || '';
+        const match = authHeader.match(/^Bearer\s+(.+)$/i);
+        if (!match) {
+          return new Response(JSON.stringify({ error: 'unauthorized' }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        try {
+          await verifyFirebaseIdToken(match[1], env.FIREBASE_PROJECT_ID);
+        } catch (authErr) {
+          console.warn('[Directory Auth Error]', authErr);
+          return new Response(JSON.stringify({ error: 'invalid_token' }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_GUILD_ID) {
+          return new Response(JSON.stringify({ error: 'bot_directory_unavailable' }), {
+            status: 503,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const [rawRoles, rawMembers] = await Promise.all([
+          getGuildRoles(env.DISCORD_BOT_TOKEN, env.DISCORD_GUILD_ID),
+          getAllGuildMembers(env.DISCORD_BOT_TOKEN, env.DISCORD_GUILD_ID),
+        ]);
+
+        const roles = rawRoles
+          .filter(r => r.id !== env.DISCORD_GUILD_ID && !r.managed)
+          .sort((a, b) => b.position - a.position)
+          .map(r => ({
+            id: r.id,
+            name: r.name,
+            color: r.color,
+            position: r.position,
+          }));
+
+        const roleMap: Record<string, string> = {};
+        for (const r of roles) {
+          roleMap[r.id] = r.name;
+        }
+
+        const adminRoleIds = getAdminRoleIds(env);
+
+        const members = rawMembers
+          .filter(m => m.user && !m.user.bot)
+          .map(m => {
+            const u = m.user!;
+            const displayName = m.nick || u.global_name || u.username;
+            const roleNames = m.roles.map(id => roleMap[id]).filter(Boolean);
+            const isAdmin =
+              (Boolean(env.DISCORD_OWNER_ID) && u.id === env.DISCORD_OWNER_ID) ||
+              m.roles.some(id => adminRoleIds.includes(id));
+
+            return {
+              discordId: u.id,
+              displayName,
+              username: u.username,
+              avatarUrl: getAvatarUrl(u),
+              roleIds: m.roles,
+              roleNames,
+              isAdmin,
+            };
+          })
+          .sort((a, b) => a.displayName.localeCompare(b.displayName, 'fr'));
+
+        return new Response(JSON.stringify({ roles, members }), {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+            'Cache-Control': 'private, max-age=60',
+          },
+        });
       }
 
       // ── Callback OAuth2 Discord ──────────────────────────────────────────
@@ -145,7 +266,7 @@ export default {
         // 2. Récupération des informations utilisateur Discord
         const discordUser = await getDiscordUser(accessToken);
 
-        // 3. Récupération du profil membre du serveur Discord
+        // 3. Récupération du profil membre du serveur Discord (obligatoire pour accéder)
         const member = env.DISCORD_GUILD_ID
           ? await getGuildMember(accessToken, env.DISCORD_GUILD_ID)
           : null;
@@ -155,27 +276,35 @@ export default {
           return Response.redirect(targetUrl.toString(), 302);
         }
 
-        // Déterminer le nom d'affichage, l'avatar et les rôles
+        // Déterminer le nom d'affichage, l'avatar et les rôles réels Discord
         const displayName = member?.nick || discordUser.global_name || discordUser.username;
         const avatarUrl = getAvatarUrl(discordUser);
         const roles = member?.roles || [];
 
-        const mappedRoles = roles.map(id => GUILD_ROLE_NAMES[id]).filter(Boolean);
+        let dynamicRoleMap: Record<string, string> = { ...FALLBACK_GUILD_ROLE_NAMES };
+        if (env.DISCORD_BOT_TOKEN && env.DISCORD_GUILD_ID) {
+          try {
+            const guildRoles = await getGuildRoles(env.DISCORD_BOT_TOKEN, env.DISCORD_GUILD_ID);
+            dynamicRoleMap = {};
+            for (const r of guildRoles) {
+              if (r.id !== env.DISCORD_GUILD_ID && !r.managed) {
+                dynamicRoleMap[r.id] = r.name;
+              }
+            }
+          } catch (roleErr) {
+            console.warn('[Worker Roles Fallback]', roleErr);
+          }
+        }
+
+        const mappedRoles = roles.map(id => dynamicRoleMap[id]).filter(Boolean);
         const roleNames = mappedRoles.length > 0 ? mappedRoles : ['Membre'];
 
-        // 4. Déterminer si capitaine (Owner ou rôle Discord Admin/Capitaine, fallback mot-clé)
-        const captainRoleIds = (env.DISCORD_CAPTAIN_ROLE_IDS || '')
-          .split(',')
-          .map(s => s.trim())
-          .filter(Boolean);
-
-        const isCaptain =
+        // 4. Déterminer si Admin (Owner ou rôle Discord Admin uniquement)
+        const adminRoleIds = getAdminRoleIds(env);
+        const isAdmin =
           (Boolean(env.DISCORD_OWNER_ID) && discordUser.id === env.DISCORD_OWNER_ID) ||
-          roles.some(r => captainRoleIds.includes(r)) ||
-          roleNames.some(name => CAPTAIN_KEYWORD_ROLES.some(kw => name.toLowerCase().includes(kw))) ||
-          CAPTAIN_KEYWORD_ROLES.some(kw =>
-            (member?.nick || discordUser.global_name || discordUser.username).toLowerCase().includes(kw)
-          );
+          roles.some(r => adminRoleIds.includes(r)) ||
+          roleNames.some(name => name.toLowerCase() === 'admin');
 
         // 5. Création du custom token Firebase
         let customToken: string;
@@ -185,8 +314,9 @@ export default {
             serviceAccount,
             discordUser.id,
             {
-              is_captain: isCaptain,
-              role: isCaptain ? 'CAPTAIN' : 'MEMBER',
+              is_admin: isAdmin,
+              is_captain: isAdmin,
+              role: isAdmin ? 'ADMIN' : 'MEMBER',
               display_name: displayName,
               avatar_url: avatarUrl,
               discord_roles: roleNames.slice(0, 12),
@@ -207,6 +337,12 @@ export default {
       return new Response('Not Found', { status: 404, headers: corsHeaders });
     } catch (err: any) {
       console.error('[Worker Error]', err);
+      if (url.pathname.startsWith('/api/')) {
+        return new Response(JSON.stringify({ error: 'server_error', message: String(err?.message || err) }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
       const errCode = err instanceof DiscordExchangeError ? 'discord_exchange_failed' : 'server_error';
       targetUrl.searchParams.set('error', errCode);
       return Response.redirect(targetUrl.toString(), 302);

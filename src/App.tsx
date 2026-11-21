@@ -3,20 +3,19 @@ import { Loader2 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { usePolls } from './contexts/PollsContext';
 import type { ResponseStatus } from './types';
-import { Navbar } from './components/Navbar';
+import { Navbar, type AppScreen } from './components/Navbar';
 import { LoginScreen } from './components/screens/LoginScreen';
 import { DashboardScreen } from './components/screens/DashboardScreen';
 import { CreatePollWizard } from './components/screens/CreatePollWizard';
 import { MemberVoteScreen } from './components/screens/MemberVoteScreen';
-import { ResultsScreen } from './components/screens/ResultsScreen';
+import { OrganizerCockpitScreen } from './components/screens/OrganizerCockpitScreen';
 import bgFond from './assets/fond.webp';
-
-type Screen = 'login' | 'dashboard' | 'create' | 'vote' | 'results' | 'profile';
 
 export function App() {
   const { userProfile, loading: authLoading } = useAuth();
   const {
     polls,
+    guildMembers,
     membersMap,
     voterNames,
     loading: pollsLoading,
@@ -25,10 +24,13 @@ export function App() {
     cancelExistingPoll,
     updateExistingPoll,
     saveVotes,
-    updateSelection,
+    updateSingleSlot,
+    saveSlotPlanBatch,
+    addSlot,
+    removeSlot,
   } = usePolls();
 
-  const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
+  const [currentScreen, setCurrentScreen] = useState<AppScreen>('dashboard');
   const [selectedPollId, setSelectedPollId] = useState<string | null>(null);
   const [deepLinkPollId, setDeepLinkPollId] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -40,7 +42,7 @@ export function App() {
     deepLinkPollId && polls.some((p) => p.id === deepLinkPollId)
   );
   const effectivePollId = deepLinkMatch ? deepLinkPollId : selectedPollId;
-  const effectiveScreen: Screen = !userProfile
+  const effectiveScreen: AppScreen = !userProfile
     ? 'login'
     : deepLinkMatch
     ? 'vote'
@@ -61,17 +63,15 @@ export function App() {
     }
   };
 
-  const navigateTo = (screen: Screen) => {
+  const navigateTo = (screen: AppScreen) => {
     clearDeepLinkUrl();
     setCurrentScreen(screen);
   };
 
-  const handleSelectPoll = (pollId: string, action: 'vote' | 'results' | 'edit') => {
+  const handleSelectPoll = (pollId: string, action: 'vote' | 'cockpit') => {
     clearDeepLinkUrl();
     setSelectedPollId(pollId);
-    if (action === 'vote') setCurrentScreen('vote');
-    else if (action === 'results') setCurrentScreen('results');
-    else if (action === 'edit') setCurrentScreen('create');
+    setCurrentScreen(action);
   };
 
   const handleCreatePollPublish = async (pollData: any) => {
@@ -79,9 +79,12 @@ export function App() {
     navigateTo('dashboard');
   };
 
-  const handleSaveVotes = async (votes: Record<string, ResponseStatus>) => {
+  const handleSaveVotes = async (
+    votes: Record<string, ResponseStatus>,
+    desiredGames: number | null
+  ) => {
     if (!activePoll) return;
-    await saveVotes(activePoll.id, votes);
+    await saveVotes(activePoll.id, votes, desiredGames);
   };
 
   const handleClosePoll = async (pollId: string) => {
@@ -143,6 +146,7 @@ export function App() {
 
             {effectiveScreen === 'create' && userProfile && (
               <CreatePollWizard
+                currentUser={userProfile}
                 onCancel={() => navigateTo('dashboard')}
                 onPublish={handleCreatePollPublish}
               />
@@ -158,14 +162,21 @@ export function App() {
               />
             )}
 
-            {effectiveScreen === 'results' && userProfile && activePoll && (
-              <ResultsScreen
-                key={activePoll.id}
-                poll={activePoll}
+            {effectiveScreen === 'cockpit' && userProfile && (
+              <OrganizerCockpitScreen
+                polls={polls}
+                selectedPollId={activePoll?.id || null}
+                onSelectPollId={(id) => setSelectedPollId(id)}
                 currentUser={userProfile}
+                guildMembers={guildMembers}
                 membersMap={membersMap}
                 voterNames={voterNames}
-                onUpdateSelection={updateSelection}
+                onUpdateSlot={updateSingleSlot}
+                onSaveSlotPlanBatch={saveSlotPlanBatch}
+                onAddSlot={addSlot}
+                onRemoveSlot={removeSlot}
+                onUpdatePoll={updateExistingPoll}
+                onCreatePoll={() => navigateTo('create')}
                 onBack={() => navigateTo('dashboard')}
               />
             )}

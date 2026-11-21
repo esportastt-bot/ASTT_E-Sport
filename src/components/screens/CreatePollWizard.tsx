@@ -1,9 +1,15 @@
-import React, { useState } from 'react';
-import type { TrainingType } from '../../types';
+import React, { useMemo, useState } from 'react';
+import {
+  TRAINING_TYPE_LABELS,
+  type SlotProfile,
+  type TrainingType,
+  type UserProfile,
+} from '../../types';
 import {
   ArrowLeft, ArrowRight, Check, Calendar, Users, Settings2,
-  Plus, Trash2, ChevronLeft, ChevronRight, Copy,
-  Eye, CheckCircle2, Clock, Loader2, AlertTriangle, Info
+  Plus, Trash2, ChevronLeft, ChevronRight, Bookmark, BookmarkPlus,
+  Eye, CheckCircle2, Clock, Loader2, AlertTriangle, RefreshCw,
+  Search, UserPlus, UserMinus
 } from 'lucide-react';
 import { usePolls } from '../../contexts/PollsContext';
 import { UserAvatar } from '../UserAvatar';
@@ -13,6 +19,7 @@ import {
 } from '../../utils/dateUtils';
 
 interface CreatePollWizardProps {
+  currentUser: UserProfile;
   onCancel: () => void;
   onPublish: (pollData: any) => Promise<void> | void;
 }
@@ -30,43 +37,21 @@ interface DayConfig {
   slots: DaySlotForm[];
 }
 
-interface SavedPollTemplate {
-  trainingType?: TrainingType;
-  minParticipants?: number;
-  maxParticipants?: number;
-  selectedRoles?: string[];
-  days?: Array<{ dayName: string; active: boolean; slots: DaySlotForm[] }>;
-}
-
-const TEMPLATE_STORAGE_KEY = 'astt_last_poll_template';
-
-const ASTT_DISCORD_ROLES = [
-  'Membre',
-  'Débutant',
-  'Intermédiaire',
-  'Pro',
-  'Inter-entreprise',
-  'Gamer ++',
-  'Admin',
-  '>>KSG',
-];
-
-function loadSavedTemplate(): SavedPollTemplate | null {
-  try {
-    const raw = localStorage.getItem(TEMPLATE_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as SavedPollTemplate;
-  } catch {
-    return null;
-  }
-}
-
 export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
+  currentUser,
   onCancel,
   onPublish,
 }) => {
-  const { membersMap } = usePolls();
-  const [savedTemplate] = useState<SavedPollTemplate | null>(() => loadSavedTemplate());
+  const {
+    guildMembers,
+    guildRoles,
+    directoryLoading,
+    directoryError,
+    refreshDirectory,
+    slotProfiles,
+    saveProfile,
+    removeProfile,
+  } = usePolls();
 
   const [step, setStep] = useState<number>(1);
   const totalSteps = 4;
@@ -82,28 +67,13 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
 
   // Form State
   const [title, setTitle] = useState(`Entraînements ${weekLabel}`);
-  const [trainingType, setTrainingType] = useState<TrainingType>(
-    savedTemplate?.trainingType || 'ASTT'
-  );
+  const [trainingType, setTrainingType] = useState<TrainingType>('ASTT');
 
-  // Configuration des jours et de leurs créneaux individuels (mémorisée depuis le dernier sondage)
+  // Configuration des jours et créneaux individuels
   const [days, setDays] = useState<DayConfig[]>(() => {
     const initialMonday = addDays(getMonday(new Date()), 7);
     return DAYS_CONFIG.map((d, index) => {
       const dayDate = addDays(initialMonday, index);
-      const savedDay = savedTemplate?.days?.find((sd) => sd.dayName === d.dayName);
-      if (savedDay && Array.isArray(savedDay.slots)) {
-        return {
-          date: dayDate,
-          dateStr: formatISODate(dayDate),
-          dayName: d.dayName,
-          active: Boolean(savedDay.active),
-          slots: savedDay.slots.map((s) => ({
-            startTime: s.startTime || '20:30',
-            endTime: s.endTime || '21:50',
-          })),
-        };
-      }
       const isWeekday = index < 5;
       return {
         date: dayDate,
@@ -115,11 +85,28 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
     });
   });
 
+  // Profils de créneaux (ex: Profil HFGET)
+  const [loadedProfileName, setLoadedProfileName] = useState<string | null>(null);
+  const [newProfileName, setNewProfileName] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
+
   // Date et heure limites de réponse (clôture)
   const [deadlineDate, setDeadlineDate] = useState(() =>
     formatISODate(addDays(addDays(getMonday(new Date()), 7), -1))
   );
   const [deadlineTime, setDeadlineTime] = useState('20:00');
+
+  // Participants & Limites (RIEN n'est coché à la base)
+  const [minParticipants, setMinParticipants] = useState(4);
+  const [maxParticipants, setMaxParticipants] = useState(8);
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [manuallyAddedIds, setManuallyAddedIds] = useState<string[]>([]);
+  const [memberSearch, setMemberSearch] = useState('');
+
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
 
   // Met à jour la semaine, le titre, les dates de chaque jour ET la date de clôture
   const applyWeekMonday = (newMonday: Date) => {
@@ -144,6 +131,79 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
 
   const changeWeek = (offsetWeeks: number) => {
     applyWeekMonday(addDays(selectedMonday, offsetWeeks * 7));
+  };
+
+  // Charger un profil (ex: Profil HFGET) dans les jours de la semaine en cours
+  const handleLoadSlotProfile = (profile: SlotProfile) => {
+    setDays((prev) =>
+      prev.map((day) => {
+        const match = profile.days.find((pd) => pd.dayName === day.dayName);
+        if (!match) return day;
+        return {
+          ...day,
+          active: Boolean(match.active),
+          slots: match.slots.map((s) => ({
+            startTime: s.startTime || '20:30',
+            endTime: s.endTime || '21:50',
+          })),
+        };
+      })
+    );
+    if (profile.trainingType) setTrainingType(profile.trainingType);
+    if (typeof profile.minParticipants === 'number') setMinParticipants(profile.minParticipants);
+    if (typeof profile.maxParticipants === 'number') setMaxParticipants(profile.maxParticipants);
+    setLoadedProfileName(profile.name);
+    setProfileMessage(
+      `Profil « ${profile.name} » chargé. Vous pouvez maintenant modifier librement chaque jour ou horaire.`
+    );
+  };
+
+  // Enregistrer le planning actuel comme profil réutilisable
+  const handleSaveSlotProfile = async () => {
+    const cleanName = newProfileName.trim();
+    if (!cleanName || savingProfile) return;
+
+    setSavingProfile(true);
+    setProfileMessage(null);
+    try {
+      const existing = slotProfiles.find(
+        (p) =>
+          p.name.toLowerCase() === cleanName.toLowerCase() &&
+          (currentUser.isAdmin || p.createdBy === currentUser.id)
+      );
+
+      await saveProfile({
+        id: existing?.id,
+        name: cleanName,
+        createdBy: existing?.createdBy || currentUser.id,
+        createdByName: existing?.createdByName || currentUser.name,
+        trainingType,
+        minParticipants,
+        maxParticipants,
+        days: days.map((d) => ({
+          dayName: d.dayName,
+          active: d.active,
+          slots: d.slots.map((s) => ({ startTime: s.startTime, endTime: s.endTime })),
+        })),
+      });
+
+      setLoadedProfileName(cleanName);
+      setNewProfileName('');
+      setProfileMessage(`Profil « ${cleanName} » enregistré !`);
+    } catch (err: any) {
+      setProfileMessage(err?.message || "Impossible d'enregistrer ce profil.");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleDeleteSlotProfile = async (profile: SlotProfile) => {
+    try {
+      await removeProfile(profile.id);
+      if (loadedProfileName === profile.name) setLoadedProfileName(null);
+    } catch (err: any) {
+      setProfileMessage(err?.message || 'Impossible de supprimer ce profil.');
+    }
   };
 
   // Toggle active day
@@ -217,56 +277,79 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
     });
   };
 
-  // Dupliquer les créneaux d'un jour sur tous les jours activés
-  const duplicateSlotsToAllActiveDays = (sourceDayIndex: number) => {
-    const sourceSlots = days[sourceDayIndex].slots;
-    if (sourceSlots.length === 0) return;
+  // Cocher / décocher un rôle Discord : bascule auto vers/depuis "Membres concernés"
+  const toggleDiscordRole = (roleId: string) => {
+    const isCurrentlySelected = selectedRoleIds.includes(roleId);
 
-    setDays((prev) =>
-      prev.map((d) => (d.active ? { ...d, slots: sourceSlots.map((s) => ({ ...s })) } : d))
-    );
+    if (!isCurrentlySelected) {
+      const nextRoleIds = [...selectedRoleIds, roleId];
+      setSelectedRoleIds(nextRoleIds);
+      const roleMemberIds = guildMembers
+        .filter((m) => m.roleIds.includes(roleId))
+        .map((m) => m.discordId);
+
+      setSelectedMemberIds((prev) => Array.from(new Set([...prev, ...roleMemberIds])));
+    } else {
+      const nextRoleIds = selectedRoleIds.filter((id) => id !== roleId);
+      setSelectedRoleIds(nextRoleIds);
+
+      setSelectedMemberIds((prev) =>
+        prev.filter((uid) => {
+          if (manuallyAddedIds.includes(uid)) return true;
+          const member = guildMembers.find((m) => m.discordId === uid);
+          if (!member) return false;
+          // Conserver uniquement si le membre possède encore un autre rôle coché
+          return member.roleIds.some((rId) => nextRoleIds.includes(rId));
+        })
+      );
+    }
   };
 
-  // Participants & Limites
-  const [minParticipants, setMinParticipants] = useState(
-    savedTemplate?.minParticipants || 4
-  );
-  const [maxParticipants, setMaxParticipants] = useState(
-    savedTemplate?.maxParticipants || 8
-  );
-  const [selectedRoles, setSelectedRoles] = useState<string[]>(
-    savedTemplate?.selectedRoles && savedTemplate.selectedRoles.length > 0
-      ? savedTemplate.selectedRoles
-      : ['Membre']
-  );
-  const [excludedUsers, setExcludedUsers] = useState<string[]>([]);
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [publishError, setPublishError] = useState<string | null>(null);
-
-  const toggleRole = (role: string) => {
-    setSelectedRoles((prev) =>
-      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
-    );
+  // Basculer un membre vers "Membres concernés" (clic dans la zone gauche)
+  const addMemberToTarget = (discordId: string) => {
+    setSelectedMemberIds((prev) => (prev.includes(discordId) ? prev : [...prev, discordId]));
+    setManuallyAddedIds((prev) => (prev.includes(discordId) ? prev : [...prev, discordId]));
   };
 
-  const toggleExcluded = (userId: string) => {
-    setExcludedUsers((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
-    );
+  // Retirer un membre de "Membres concernés" (clic dans la zone droite, même s'il a un rôle coché)
+  const removeMemberFromTarget = (discordId: string) => {
+    setSelectedMemberIds((prev) => prev.filter((id) => id !== discordId));
+    setManuallyAddedIds((prev) => prev.filter((id) => id !== discordId));
   };
 
-  // Membres réels depuis Firestore
-  const allMembers = Object.values(membersMap);
-  const targetedMembers = allMembers.filter((m) =>
-    selectedRoles.length === 0
-      ? true
-      : m.discordRoles.some((r) => selectedRoles.includes(r))
-  );
-  const eligibleMembers = targetedMembers.filter(
-    (m) => !excludedUsers.includes(m.discordId)
+  const addAllAvailableMembers = () => {
+    const allIds = guildMembers.map((m) => m.discordId);
+    setSelectedMemberIds(allIds);
+    setManuallyAddedIds(allIds);
+  };
+
+  const clearSelectedMembers = () => {
+    setSelectedMemberIds([]);
+    setManuallyAddedIds([]);
+    setSelectedRoleIds([]);
+  };
+
+  const selectedMembersList = useMemo(
+    () =>
+      selectedMemberIds
+        .map((id) => guildMembers.find((m) => m.discordId === id))
+        .filter((m): m is NonNullable<typeof m> => Boolean(m)),
+    [selectedMemberIds, guildMembers]
   );
 
-  // Calcul du nombre total de créneaux créés
+  const unselectedMembersList = useMemo(() => {
+    const search = memberSearch.trim().toLowerCase();
+    return guildMembers.filter((m) => {
+      if (selectedMemberIds.includes(m.discordId)) return false;
+      if (!search) return true;
+      return (
+        m.displayName.toLowerCase().includes(search) ||
+        m.username.toLowerCase().includes(search) ||
+        m.roleNames.some((rn) => rn.toLowerCase().includes(search))
+      );
+    });
+  }, [guildMembers, selectedMemberIds, memberSearch]);
+
   const totalSlotsCount = days.reduce(
     (acc, d) => acc + (d.active ? d.slots.length : 0),
     0
@@ -292,6 +375,12 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       setPublishError('Veuillez renseigner une date et une heure de clôture valides.');
       return;
     }
+    if (selectedMemberIds.length === 0) {
+      setPublishError(
+        'Sélectionnez au moins un membre dans la zone « Membres concernés » (étape 3) pour qu’il puisse voir ce sondage.'
+      );
+      return;
+    }
 
     const finalSlots: any[] = [];
     days.forEach((d) => {
@@ -313,26 +402,12 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       }
     });
 
+    const selectedRoleNames = guildRoles
+      .filter((r) => selectedRoleIds.includes(r.id))
+      .map((r) => r.name);
+
     setIsPublishing(true);
     try {
-      // Mémoriser les préférences pour le prochain sondage
-      try {
-        const templateToSave: SavedPollTemplate = {
-          trainingType,
-          minParticipants,
-          maxParticipants,
-          selectedRoles,
-          days: days.map((d) => ({
-            dayName: d.dayName,
-            active: d.active,
-            slots: d.slots,
-          })),
-        };
-        localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templateToSave));
-      } catch {
-        // Ignorer si localStorage indisponible
-      }
-
       await onPublish({
         title: title.trim(),
         trainingType,
@@ -341,8 +416,9 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         deadline: `${deadlineDate}T${deadlineTime}:00`,
         minParticipants,
         maxParticipants,
-        targetRoles: selectedRoles,
-        excludedUsers,
+        targetRoles: selectedRoleNames,
+        targetUsers: selectedMemberIds,
+        excludedUsers: [],
         slots: finalSlots,
       });
     } catch (err: any) {
@@ -354,9 +430,9 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
 
-      {/* Top Breadcrumb & Step Navigation */}
+      {/* Top Breadcrumb */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-4">
         <div>
           <button
@@ -385,8 +461,8 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       <div className="grid grid-cols-4 gap-2">
         {[
           { num: 1, title: 'Semaine & Type', icon: Settings2 },
-          { num: 2, title: 'Créneaux par jour', icon: Calendar },
-          { num: 3, title: 'Participants', icon: Users },
+          { num: 2, title: 'Créneaux & Profils', icon: Calendar },
+          { num: 3, title: 'Membres ciblés', icon: Users },
           { num: 4, title: 'Validation', icon: Check },
         ].map((s) => {
           const IconComponent = s.icon;
@@ -407,7 +483,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               }`}
             >
               <div
-                className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
+                className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
                   isActive
                     ? 'bg-indigo-600 text-white'
                     : isPassed
@@ -426,7 +502,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       </div>
 
       {/* Step Content */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-6">
 
         {/* STEP 1: SEMAINE & TYPE */}
         {step === 1 && (
@@ -470,7 +546,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 </button>
               </div>
 
-              {/* Raccourcis de semaine */}
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -500,22 +575,22 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               />
             </div>
 
-            {/* Type de session */}
+            {/* Type de session (4 choix incluant Entraînement) */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-slate-300">Type de session</label>
-              <div className="grid grid-cols-3 gap-3">
-                {(['MIX', 'SCRIM', 'ASTT'] as TrainingType[]).map((t) => (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {(['MIX', 'SCRIM', 'ASTT', 'ENTRAINEMENT'] as TrainingType[]).map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setTrainingType(t)}
-                    className={`py-3 px-4 rounded-xl border text-sm font-semibold transition ${
+                    className={`py-3 px-3 rounded-xl border text-sm font-semibold transition ${
                       trainingType === t
                         ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/25'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
                     }`}
                   >
-                    {t}
+                    {TRAINING_TYPE_LABELS[t]}
                   </button>
                 ))}
               </div>
@@ -550,17 +625,17 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           </div>
         )}
 
-        {/* STEP 2: CRÉNEAUX PAR JOUR */}
+        {/* STEP 2: PROFILS & CRÉNEAUX PAR JOUR */}
         {step === 2 && (
           <div className="space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-base font-semibold text-white flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-indigo-400" />
-                  Étape 2 : Créneaux horaires de la semaine
+                  Étape 2 : Profils & Créneaux horaires
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Chaque jour peut avoir des horaires différents et plusieurs créneaux (ex: 18h-19h20 et 20h-21h20).
+                  Chargez un profil pré-enregistré (ex: Profil HFGET) ou configurez chaque jour librement.
                 </p>
               </div>
 
@@ -569,6 +644,99 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               </span>
             </div>
 
+            {/* Bloc Profils de créneaux */}
+            <div className="bg-slate-950/90 border border-indigo-500/25 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300">
+                  <Bookmark className="w-4 h-4" />
+                  <span>Profils de créneaux réutilisables</span>
+                </div>
+                {loadedProfileName && (
+                  <span className="text-[11px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-2 py-0.5 rounded-lg">
+                    Chargé : {loadedProfileName}
+                  </span>
+                )}
+              </div>
+
+              {slotProfiles.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {slotProfiles.map((profile) => {
+                    const isLoaded = loadedProfileName === profile.name;
+                    const canDelete =
+                      currentUser.isAdmin || profile.createdBy === currentUser.id;
+                    const activeDaysCount = profile.days.filter((d) => d.active).length;
+
+                    return (
+                      <div
+                        key={profile.id}
+                        className={`flex items-center rounded-xl border text-xs overflow-hidden transition ${
+                          isLoaded
+                            ? 'bg-indigo-600/25 border-indigo-400 text-white'
+                            : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-indigo-500/60'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleLoadSlotProfile(profile)}
+                          className="px-3 py-1.5 flex items-center gap-1.5 hover:text-white transition"
+                          title={`Charger les jours et horaires de « ${profile.name} »`}
+                        >
+                          <Bookmark className="w-3 h-3 text-indigo-400" />
+                          <span className="font-semibold">{profile.name}</span>
+                          <span className="text-[10px] text-slate-400">
+                            ({activeDaysCount}j)
+                          </span>
+                        </button>
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSlotProfile(profile)}
+                            className="px-2 py-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 border-l border-slate-800 transition"
+                            title="Supprimer ce profil"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  Aucun profil enregistré pour le moment. Configurez vos créneaux ci-dessous puis donnez un nom (ex: <strong className="text-slate-200">Profil HFGET</strong>) pour le réutiliser en 1 clic.
+                </p>
+              )}
+
+              {/* Sauvegarder le planning actuel comme profil */}
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <input
+                  type="text"
+                  value={newProfileName}
+                  onChange={(e) => setNewProfileName(e.target.value)}
+                  placeholder="Nom du profil (ex: Profil HFGET)"
+                  className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveSlotProfile}
+                  disabled={!newProfileName.trim() || savingProfile}
+                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  {savingProfile ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <BookmarkPlus className="w-3.5 h-3.5" />
+                  )}
+                  <span>Enregistrer ce planning en profil</span>
+                </button>
+              </div>
+
+              {profileMessage && (
+                <p className="text-[11px] text-emerald-300">{profileMessage}</p>
+              )}
+            </div>
+
+            {/* Liste des jours de la semaine (sans bouton "Copier sur les autres jours") */}
             <div className="space-y-3">
               {days.map((day, dayIdx) => {
                 const dayDateFormatted = formatFRDate(day.date);
@@ -602,32 +770,16 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                         </label>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        {day.active && (
-                          <>
-                            {day.slots.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => duplicateSlotsToAllActiveDays(dayIdx)}
-                                className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800 transition"
-                                title="Copier ces horaires sur tous les autres jours cochés"
-                              >
-                                <Copy className="w-3 h-3" />
-                                <span className="hidden sm:inline">Copier sur les autres jours</span>
-                              </button>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => addSlotToDay(dayIdx)}
-                              className="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-2.5 py-1 rounded-lg transition flex items-center gap-1 shadow-sm"
-                            >
-                              <Plus className="w-3 h-3" />
-                              <span>Ajouter créneau</span>
-                            </button>
-                          </>
-                        )}
-                      </div>
+                      {day.active && (
+                        <button
+                          type="button"
+                          onClick={() => addSlotToDay(dayIdx)}
+                          className="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-2.5 py-1 rounded-lg transition flex items-center gap-1 shadow-sm"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Ajouter créneau</span>
+                        </button>
+                      )}
                     </div>
 
                     {day.active && (
@@ -719,99 +871,207 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           </div>
         )}
 
-        {/* STEP 3: PARTICIPANTS */}
+        {/* STEP 3: PARTICIPANTS (RÔLES NON COCHÉS + 2 ZONES DISCORD) */}
         {step === 3 && (
           <div className="space-y-5">
-            <div>
-              <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                <Users className="w-4 h-4 text-indigo-400" />
-                Étape 3 : Qui peut participer ?
-              </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                Sélectionnez les rôles Discord autorisés. L'identification Discord garantit qu'aucune usurpation n'est possible.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Users className="w-4 h-4 text-indigo-400" />
+                  Étape 3 : Qui peut voir et répondre à ce sondage ?
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Seuls les membres placés dans « Membres concernés » verront ce sondage. Cochez un rôle pour basculer tout le groupe, ou cliquez sur un membre pour le déplacer individuellement.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void refreshDirectory()}
+                disabled={directoryLoading}
+                className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl border border-slate-700 flex items-center gap-1.5 self-start sm:self-auto shrink-0 transition disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${directoryLoading ? 'animate-spin' : ''}`} />
+                <span>Actualiser Discord</span>
+              </button>
             </div>
 
-            {/* Rôles ciblés */}
+            {directoryError && (
+              <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{directoryError}</span>
+              </div>
+            )}
+
+            {/* Rôles Discord (rien coché par défaut) */}
             <div className="space-y-2">
-              <label className="text-xs font-medium text-slate-300">Rôles Discord autorisés :</label>
-              <div className="flex flex-wrap gap-2">
-                {ASTT_DISCORD_ROLES.map((role) => {
-                  const isSelected = selectedRoles.includes(role);
-                  return (
-                    <button
-                      key={role}
-                      type="button"
-                      onClick={() => toggleRole(role)}
-                      className={`px-3 py-1.5 rounded-xl border text-xs font-medium transition flex items-center gap-1.5 ${
-                        isSelected
-                          ? 'bg-indigo-600 border-indigo-500 text-white shadow'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      {isSelected && <Check className="w-3.5 h-3.5" />}
-                      <span>{role}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+              <label className="text-xs font-medium text-slate-300">
+                Rôles Discord (cliquer pour basculer les membres du rôle) :
+              </label>
 
-            {/* Membres enregistrés depuis Firestore */}
-            <div className="space-y-2 pt-2 border-t border-slate-800">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-300">
-                  Membres connus ({eligibleMembers.length} éligible(s))
-                </label>
-                <span className="text-[11px] text-slate-400">Synchronisé via Discord</span>
-              </div>
-
-              {allMembers.length === 0 ? (
-                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 text-xs text-slate-400 flex items-start gap-2.5">
-                  <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                  <p>
-                    Les membres du serveur ASTT apparaîtront automatiquement ici dès leur première connexion à l'application. Tous les joueurs disposant du lien du sondage pourront voter.
-                  </p>
-                </div>
-              ) : targetedMembers.length === 0 ? (
-                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 text-xs text-slate-400">
-                  Aucun membre connecté ne correspond actuellement aux rôles sélectionnés.
-                </div>
+              {guildRoles.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  {directoryLoading ? 'Chargement des rôles Discord...' : 'Aucun rôle disponible.'}
+                </p>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
-                  {targetedMembers.map((member) => {
-                    const isExcluded = excludedUsers.includes(member.discordId);
+                <div className="flex flex-wrap gap-2">
+                  {guildRoles.map((role) => {
+                    const isSelected = selectedRoleIds.includes(role.id);
+                    const countInRole = guildMembers.filter((m) =>
+                      m.roleIds.includes(role.id)
+                    ).length;
+
                     return (
-                      <div
-                        key={member.discordId}
-                        className={`p-2.5 rounded-xl border text-xs flex items-center justify-between transition ${
-                          isExcluded
-                            ? 'bg-slate-950/40 border-slate-800/50 text-slate-400 line-through'
-                            : 'bg-slate-950 border-slate-800 text-slate-200'
+                      <button
+                        key={role.id}
+                        type="button"
+                        onClick={() => toggleDiscordRole(role.id)}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-medium transition flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'bg-indigo-600 border-indigo-400 text-white shadow'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
                         }`}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <UserAvatar avatar={member.avatarUrl} name={member.displayName} size="xs" />
-                          <span className="font-medium truncate">{member.displayName}</span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => toggleExcluded(member.discordId)}
-                          className={`text-[10px] px-2 py-0.5 rounded transition shrink-0 ${
-                            isExcluded
-                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                              : 'bg-slate-800 text-slate-400 hover:text-red-300'
+                        {isSelected && <Check className="w-3.5 h-3.5" />}
+                        <span>{role.name}</span>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                            isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'
                           }`}
-                          title={isExcluded ? 'Réintégrer le membre' : 'Exclure pour ce sondage'}
                         >
-                          {isExcluded ? 'Réintégrer' : 'Exclure'}
-                        </button>
-                      </div>
+                          {countInRole}
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
               )}
+            </div>
+
+            {/* 2 Zones côte à côte : Tous les membres vs Membres concernés */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800">
+
+              {/* ZONE GAUCHE : Tous les membres du serveur */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-200">
+                    Tous les membres du serveur ({unselectedMembersList.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={addAllAvailableMembers}
+                    disabled={guildMembers.length === 0}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 disabled:opacity-40"
+                  >
+                    Tout ajouter
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={memberSearch}
+                    onChange={(e) => setMemberSearch(e.target.value)}
+                    placeholder="Rechercher un pseudo ou rôle..."
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                  {directoryLoading && guildMembers.length === 0 ? (
+                    <div className="flex items-center justify-center py-8 text-xs text-slate-400 gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                      <span>Chargement des membres du serveur ASTT...</span>
+                    </div>
+                  ) : unselectedMembersList.length === 0 ? (
+                    <p className="text-xs text-slate-500 italic text-center py-6">
+                      Aucun autre membre disponible
+                    </p>
+                  ) : (
+                    unselectedMembersList.map((member) => (
+                      <button
+                        key={member.discordId}
+                        type="button"
+                        onClick={() => addMemberToTarget(member.discordId)}
+                        className="w-full p-2 rounded-xl bg-slate-900/90 hover:bg-indigo-950/50 border border-slate-800 hover:border-indigo-500/50 text-left flex items-center justify-between gap-2 transition group"
+                        title="Cliquer pour ajouter aux membres concernés"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <UserAvatar avatar={member.avatarUrl} name={member.displayName} size="sm" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-slate-100 truncate">
+                              {member.displayName}
+                            </p>
+                            {member.roleNames.length > 0 && (
+                              <p className="text-[10px] text-slate-400 truncate">
+                                {member.roleNames.join(' · ')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <UserPlus className="w-3.5 h-3.5 text-slate-500 group-hover:text-indigo-400 shrink-0" />
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* ZONE DROITE : Membres concernés */}
+              <div className="bg-slate-950/70 border border-emerald-500/30 rounded-2xl p-3.5 flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-emerald-300">
+                    Membres concernés ({selectedMembersList.length})
+                  </span>
+                  {selectedMembersList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearSelectedMembers}
+                      className="text-[11px] text-red-400 hover:text-red-300"
+                    >
+                      Tout retirer
+                    </button>
+                  )}
+                </div>
+
+                <p className="text-[11px] text-slate-400">
+                  Cliquez sur un membre pour le retirer de ce sondage (même s'il appartient à un rôle coché).
+                </p>
+
+                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                  {selectedMembersList.length === 0 ? (
+                    <p className="text-xs text-slate-500 italic text-center py-8">
+                      Aucun membre sélectionné pour le moment.
+                    </p>
+                  ) : (
+                    selectedMembersList.map((member) => (
+                      <button
+                        key={member.discordId}
+                        type="button"
+                        onClick={() => removeMemberFromTarget(member.discordId)}
+                        className="w-full p-2 rounded-xl bg-emerald-950/25 hover:bg-red-950/35 border border-emerald-700/40 hover:border-red-500/50 text-left flex items-center justify-between gap-2 transition group"
+                        title="Cliquer pour retirer ce membre"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <UserAvatar avatar={member.avatarUrl} name={member.displayName} size="sm" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-white truncate">
+                              {member.displayName}
+                            </p>
+                            {member.roleNames.length > 0 && (
+                              <p className="text-[10px] text-slate-400 truncate">
+                                {member.roleNames.join(' · ')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <UserMinus className="w-3.5 h-3.5 text-emerald-400 group-hover:text-red-400 shrink-0" />
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
             </div>
           </div>
         )}
@@ -834,17 +1094,19 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 <span className="font-semibold text-white text-right">{weekLabel}</span>
               </div>
               <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Type de match :</span>
-                <span className="font-semibold text-indigo-400">{trainingType}</span>
+                <span className="text-slate-400">Type de session :</span>
+                <span className="font-semibold text-indigo-400">
+                  {TRAINING_TYPE_LABELS[trainingType]}
+                </span>
               </div>
               <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
                 <span className="text-slate-400">Créneaux configurés :</span>
                 <span className="font-semibold text-emerald-400">{totalSlotsCount} créneau(x)</span>
               </div>
               <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Rôles ciblés :</span>
-                <span className="font-semibold text-white text-right">
-                  {selectedRoles.length > 0 ? selectedRoles.join(', ') : 'Tous les membres'}
+                <span className="text-slate-400">Membres concernés :</span>
+                <span className="font-semibold text-white">
+                  {selectedMembersList.length} membre(s)
                 </span>
               </div>
               <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">

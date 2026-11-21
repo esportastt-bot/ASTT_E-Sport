@@ -33,7 +33,7 @@ const AuthContext = createContext<AuthContextType>({
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   discord_denied: "Connexion Discord annulée. Vous pouvez réessayer quand vous êtes prêt.",
   no_code: "Code d'autorisation Discord manquant lors de la redirection.",
-  not_in_guild: "Accès refusé : votre compte Discord n'est pas membre du serveur ASTT.",
+  not_in_guild: "Accès refusé : seuls les membres du serveur Discord ASTT peuvent accéder à cette application.",
   discord_exchange_failed: "Échec de la validation du code Discord (redirect_uri ou identifiants OAuth2 invalides).",
   worker_misconfigured: "Le serveur d'authentification Discord est incomplètement configuré.",
   firebase_token_failed: "Impossible de générer la session sécurisée Firebase.",
@@ -115,7 +115,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             claims = await getUserClaims(true);
           }
 
-          const isCaptain = claims.is_captain === true || claims.role === 'CAPTAIN';
+          const isAdmin =
+            claims.is_admin === true ||
+            claims.role === 'ADMIN' ||
+            claims.is_captain === true;
+
           const roles: string[] =
             Array.isArray(claims.discord_roles) && claims.discord_roles.length > 0
               ? claims.discord_roles
@@ -125,7 +129,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: user.uid,
             name: claims.display_name || user.displayName || 'Membre ASTT',
             avatar: claims.avatar_url || '🎮',
-            role: isCaptain ? 'CAPTAIN' : 'MEMBER',
+            isAdmin,
             discordRoles: roles,
           };
 
@@ -136,7 +140,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             discordId: user.uid,
             displayName: profile.name,
             avatarUrl: typeof profile.avatar === 'string' ? profile.avatar : '',
-            isCaptain: profile.role === 'CAPTAIN',
+            isAdmin: profile.isAdmin,
             discordRoles: profile.discordRoles,
           }).catch((err) => {
             console.warn('Impossible de synchroniser le profil membre Firestore:', err);

@@ -5,7 +5,7 @@ export interface MemberProfile {
   discordId: string;
   displayName: string;
   avatarUrl: string;
-  isCaptain: boolean;
+  isAdmin: boolean;
   discordRoles: string[];
   updatedAt?: any;
 }
@@ -18,7 +18,7 @@ export async function upsertMember(profile: MemberProfile): Promise<void> {
       discord_id: profile.discordId,
       display_name: profile.displayName,
       avatar_url: profile.avatarUrl,
-      is_captain: profile.isCaptain,
+      is_admin: profile.isAdmin,
       discord_roles: profile.discordRoles,
       updated_at: serverTimestamp(),
     },
@@ -43,7 +43,7 @@ export function subscribeToMember(
         discordId: d.discord_id || snap.id,
         displayName: d.display_name || 'Membre ASTT',
         avatarUrl: d.avatar_url || '',
-        isCaptain: Boolean(d.is_captain),
+        isAdmin: Boolean(d.is_admin || d.is_captain),
         discordRoles: Array.isArray(d.discord_roles) ? d.discord_roles : [],
       });
     },
@@ -69,7 +69,7 @@ export function subscribeToAllMembers(
           discordId,
           displayName: d.display_name || 'Membre ASTT',
           avatarUrl: d.avatar_url || '',
-          isCaptain: Boolean(d.is_captain),
+          isAdmin: Boolean(d.is_admin || d.is_captain),
           discordRoles: Array.isArray(d.discord_roles) ? d.discord_roles : [],
         };
       });

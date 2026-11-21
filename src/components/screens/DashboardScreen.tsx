@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import type { Poll, UserProfile } from '../../types';
+import { TRAINING_TYPE_LABELS, type Poll, type UserProfile } from '../../types';
 import {
   PlusCircle, Clock, Users, ArrowRight, CheckCircle2,
   AlertCircle, Trash2, Ban, MoreVertical, Calendar, Loader2,
-  Share2, Check, Lock, RotateCcw, AlertTriangle
+  Share2, Check, Lock, RotateCcw, AlertTriangle, SlidersHorizontal
 } from 'lucide-react';
 import { UserAvatar } from '../UserAvatar';
 import { formatFRDateTime, formatShortFRDate } from '../../utils/dateUtils';
@@ -12,7 +12,7 @@ interface DashboardScreenProps {
   currentUser: UserProfile;
   polls: Poll[];
   loading?: boolean;
-  onSelectPoll: (pollId: string, action: 'vote' | 'results' | 'edit') => void;
+  onSelectPoll: (pollId: string, action: 'vote' | 'cockpit') => void;
   onCreatePoll: () => void;
   onDeletePoll?: (pollId: string) => Promise<void> | void;
   onCancelPoll?: (pollId: string) => Promise<void> | void;
@@ -31,12 +31,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onClosePoll,
   onReopenPoll,
 }) => {
-  const isCaptain = currentUser.role === 'CAPTAIN';
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [pollToDelete, setPollToDelete] = useState<Poll | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [copiedPollId, setCopiedPollId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const canManagePoll = (poll: Poll) =>
+    currentUser.isAdmin || poll.createdBy === currentUser.id;
 
   const confirmDelete = async () => {
     if (!pollToDelete || !onDeletePoll) return;
@@ -110,28 +112,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <div className="flex items-center gap-2.5">
             <UserAvatar avatar={currentUser.avatar} name={currentUser.name} size="md" />
             <h2 className="text-xl font-bold text-white">Bonjour, {currentUser.name}</h2>
-            {isCaptain && (
+            {currentUser.isAdmin && (
               <span className="bg-amber-500/20 text-amber-300 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-amber-500/30">
-                Capitaine
+                Admin
               </span>
             )}
           </div>
           <p className="text-sm text-slate-400">
-            {isCaptain
-              ? 'Gérez vos entraînements et configurez les disponibilités de votre équipe.'
-              : 'Indiquez vos disponibilités pour les prochains entraînements.'}
+            Consultez vos sondages ciblés, indiquez vos disponibilités ou créez un nouveau sondage.
           </p>
         </div>
 
-        {isCaptain && (
-          <button
-            onClick={onCreatePoll}
-            className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-indigo-600/20 transition active:scale-[0.98]"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>Nouveau sondage</span>
-          </button>
-        )}
+        <button
+          onClick={onCreatePoll}
+          className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-indigo-600/20 transition active:scale-[0.98]"
+        >
+          <PlusCircle className="w-4 h-4" />
+          <span>Nouveau sondage</span>
+        </button>
       </div>
 
       {/* Inline Action Error */}
@@ -156,7 +154,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <div className="flex items-center justify-center py-12">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-            <p className="text-sm text-slate-400">Chargement des sondages...</p>
+            <p className="text-sm text-slate-400">Chargement de vos sondages...</p>
           </div>
         </div>
       )}
@@ -177,17 +175,22 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       {!loading && openPolls.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2">
           {openPolls.map((poll) => {
-            const totalSlots = poll.slots.length;
-            const allRespondedUserIds = new Set<string>();
+            const activeSlots = poll.slots.filter((s) => !s.cancelled);
+            const totalSlots = activeSlots.length;
+            const allRespondedUserIds = new Set<string>(
+              Object.keys(poll.desiredGamesByUser || {})
+            );
             poll.slots.forEach((s) => {
               s.disponibles.forEach((id) => allRespondedUserIds.add(id));
               s.incertains.forEach((id) => allRespondedUserIds.add(id));
               s.indisponibles.forEach((id) => allRespondedUserIds.add(id));
             });
             const respondentsCount = allRespondedUserIds.size;
+            const targetCount = poll.targetUsers?.length || 0;
             const userResponded = allRespondedUserIds.has(currentUser.id);
             const isMenuOpen = openMenuId === poll.id;
             const isCopied = copiedPollId === poll.id;
+            const canManage = canManagePoll(poll);
 
             return (
               <div
@@ -195,7 +198,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 className="bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-5 shadow-lg space-y-4 transition flex flex-col justify-between relative"
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Top-right actions (Copier lien + Menu Capitaine) */}
+                {/* Top-right actions (Copier lien + Menu Organisateur/Admin) */}
                 <div className="absolute top-4 right-4 z-10 flex items-center gap-1">
                   <button
                     type="button"
@@ -211,7 +214,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     <span className="hidden sm:inline">{isCopied ? 'Copié' : 'Lien'}</span>
                   </button>
 
-                  {isCaptain && (
+                  {canManage && (
                     <div className="relative">
                       <button
                         type="button"
@@ -268,14 +271,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
                 <div className="space-y-3">
                   {/* Badges */}
-                  <div className="flex items-center gap-2 pr-24">
+                  <div className="flex flex-wrap items-center gap-2 pr-24">
                     <span className="bg-indigo-900/40 text-indigo-300 text-xs font-semibold px-2.5 py-0.5 rounded-lg border border-indigo-700/40">
-                      {poll.type}
+                      {TRAINING_TYPE_LABELS[poll.type] || poll.type}
                     </span>
                     <span className="bg-emerald-900/30 text-emerald-400 text-xs font-medium px-2 py-0.5 rounded-lg border border-emerald-700/30 flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                       Ouvert
                     </span>
+                    {canManage && (
+                      <span className="bg-amber-500/10 text-amber-300 text-[10px] font-medium px-2 py-0.5 rounded-lg border border-amber-500/25">
+                        Organisateur
+                      </span>
+                    )}
                   </div>
 
                   {/* Title & Metadata */}
@@ -284,6 +292,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       {poll.title}
                     </h4>
                     <div className="text-xs text-slate-400 mt-1.5 space-y-1">
+                      {poll.createdByName && (
+                        <p className="text-[11px] text-slate-400">
+                          Créé par <span className="text-slate-200 font-medium">{poll.createdByName}</span>
+                        </p>
+                      )}
                       <p className="flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                         <span>
@@ -291,7 +304,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                             ? `Du ${formatShortFRDate(poll.startDate)} au ${formatShortFRDate(poll.endDate)}`
                             : `${totalSlots} créneau(x)`}
                           {' · '}
-                          {totalSlots} créneau(x)
+                          {totalSlots} créneau(x) actif(s)
                         </span>
                       </p>
                       <p className="flex items-center gap-1.5">
@@ -305,7 +318,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800/80 flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2 text-slate-300">
                       <Users className="w-4 h-4 text-slate-400" />
-                      <span>{respondentsCount} réponse(s)</span>
+                      <span>
+                        {targetCount > 0
+                          ? `${respondentsCount} / ${targetCount} réponse(s)`
+                          : `${respondentsCount} réponse(s)`}
+                      </span>
                     </div>
 
                     {userResponded ? (
@@ -333,10 +350,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   </button>
 
                   <button
-                    onClick={() => onSelectPoll(poll.id, 'results')}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium py-2.5 px-3.5 rounded-xl transition border border-slate-700 hover:border-slate-600 flex items-center gap-1"
+                    onClick={() => onSelectPoll(poll.id, 'cockpit')}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium py-2.5 px-3.5 rounded-xl transition border border-slate-700 hover:border-slate-600 flex items-center gap-1.5"
                   >
-                    <span>Résultats</span>
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Pilotage & Résultats</span>
                   </button>
                 </div>
               </div>
@@ -352,56 +370,59 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             Sondages terminés ou annulés ({closedPolls.length})
           </h4>
           <div className="grid gap-2 sm:grid-cols-2">
-            {closedPolls.map((poll) => (
-              <div
-                key={poll.id}
-                className="bg-slate-900/70 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3 text-xs"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${
-                        poll.status === 'CANCELLED'
-                          ? 'bg-red-950/60 text-red-400 border-red-800/50'
-                          : 'bg-slate-800 text-slate-300 border-slate-700'
-                      }`}
+            {closedPolls.map((poll) => {
+              const canManage = canManagePoll(poll);
+              return (
+                <div
+                  key={poll.id}
+                  className="bg-slate-900/70 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${
+                          poll.status === 'CANCELLED'
+                            ? 'bg-red-950/60 text-red-400 border-red-800/50'
+                            : 'bg-slate-800 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        {poll.status === 'CANCELLED' ? 'Annulé' : 'Clôturé'}
+                      </span>
+                      <span className="font-semibold text-slate-200 truncate">{poll.title}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {canManage && onReopenPoll && (
+                      <button
+                        type="button"
+                        onClick={() => handleReopen(poll.id)}
+                        className="bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 px-2 py-1 rounded-lg border border-indigo-800/50 text-xs transition flex items-center gap-1"
+                        title="Rouvrir ce sondage"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span className="hidden sm:inline">Rouvrir</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onSelectPoll(poll.id, 'cockpit')}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700 text-xs transition"
                     >
-                      {poll.status === 'CANCELLED' ? 'Annulé' : 'Clôturé'}
-                    </span>
-                    <span className="font-semibold text-slate-200 truncate">{poll.title}</span>
+                      Pilotage
+                    </button>
+                    {canManage && (
+                      <button
+                        onClick={() => setPollToDelete(poll)}
+                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded-lg transition"
+                        title="Supprimer définitivement"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {isCaptain && onReopenPoll && (
-                    <button
-                      type="button"
-                      onClick={() => handleReopen(poll.id)}
-                      className="bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 px-2 py-1 rounded-lg border border-indigo-800/50 text-xs transition flex items-center gap-1"
-                      title="Rouvrir ce sondage"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      <span className="hidden sm:inline">Rouvrir</span>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => onSelectPoll(poll.id, 'results')}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700 text-xs transition"
-                  >
-                    Résultats
-                  </button>
-                  {isCaptain && (
-                    <button
-                      onClick={() => setPollToDelete(poll)}
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded-lg transition"
-                      title="Supprimer définitivement"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -412,21 +433,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <div className="w-14 h-14 rounded-2xl bg-slate-800/80 flex items-center justify-center mb-3">
             <Calendar className="w-7 h-7 text-slate-500" />
           </div>
-          <h3 className="text-base font-semibold text-slate-200 mb-1">Aucun sondage en cours</h3>
-          <p className="text-xs text-slate-400 mb-4 max-w-sm">
-            {isCaptain
-              ? "Vous n'avez aucun sondage actif pour le moment. Cliquez ci-dessous pour créer le sondage de la semaine prochaine."
-              : "Votre capitaine n'a pas encore publié de sondage."}
+          <h3 className="text-base font-semibold text-slate-200 mb-1">Aucun sondage visible</h3>
+          <p className="text-xs text-slate-400 mb-4 max-w-md">
+            Vous voyez ici uniquement les sondages où vous avez été sélectionné ou ceux que vous avez créés.
           </p>
-          {isCaptain && (
-            <button
-              onClick={onCreatePoll}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg shadow-indigo-600/25"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Créer un sondage</span>
-            </button>
-          )}
+          <button
+            onClick={onCreatePoll}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg shadow-indigo-600/25"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span>Créer un sondage</span>
+          </button>
         </div>
       )}
 

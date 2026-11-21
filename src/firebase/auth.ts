@@ -1,7 +1,8 @@
 import { signInWithCustomToken, signOut, onAuthStateChanged, type User } from 'firebase/auth';
 import { auth } from './config';
+import type { GuildMember, GuildRole } from '../types';
 
-const WORKER_URL = (
+export const WORKER_URL = (
   import.meta.env.VITE_WORKER_URL || 'https://astt-auth.esport-sondage.workers.dev'
 ).replace(/\/+$/, '');
 
@@ -56,10 +57,46 @@ export function onAuthChange(callback: (user: User | null) => void): () => void 
   return onAuthStateChanged(auth, callback);
 }
 
-/** Récupère les custom claims du token (isCaptain, discordId, etc.) */
+/** Récupère les custom claims du token (is_admin, discordRoles, etc.) */
 export async function getUserClaims(forceRefresh = false): Promise<Record<string, any>> {
   const user = auth.currentUser;
   if (!user) return {};
   const tokenResult = await user.getIdTokenResult(forceRefresh);
   return tokenResult.claims;
+}
+
+/** Récupère l'annuaire complet des rôles et membres du serveur Discord ASTT via le Worker */
+export async function fetchDiscordGuildDirectory(): Promise<{
+  roles: GuildRole[];
+  members: GuildMember[];
+}> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Connexion requise pour charger les membres Discord.');
+  }
+
+  const idToken = await currentUser.getIdToken();
+  const response = await fetch(`${WORKER_URL}/api/discord/guild-directory`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(
+      `Impossible de charger l'annuaire Discord (${response.status})${errText ? `: ${errText}` : ''}`
+    );
+  }
+
+  const data = (await response.json()) as {
+    roles?: GuildRole[];
+    members?: GuildMember[];
+  };
+
+  return {
+    roles: Array.isArray(data.roles) ? data.roles : [],
+    members: Array.isArray(data.members) ? data.members : [],
+  };
 }

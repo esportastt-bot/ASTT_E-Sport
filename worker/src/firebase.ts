@@ -1,4 +1,4 @@
-// Génération de Firebase Custom Tokens via l'API Web Crypto native de Cloudflare Workers
+// Génération de Firebase Custom Tokens et vérification des Firebase ID Tokens via Web Crypto API
 
 export interface ServiceAccount {
   project_id: string;
@@ -39,6 +39,127 @@ function base64url(data: ArrayBuffer | Uint8Array | string): string {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+/** Décode une chaîne base64url vers Uint8Array */
+function decodeBase64UrlBytes(b64u: string): Uint8Array {
+  const normalized = b64u.replace(/-/g, '+').replace(/_/g, '/');
+  const padLen = (4 - (normalized.length % 4)) % 4;
+  const padded = normalized + '='.repeat(padLen);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function decodeBase64UrlJson<T = Record<string, any>>(b64u: string): T {
+  const bytes = decodeBase64UrlBytes(b64u);
+  const text = new TextDecoder().decode(bytes);
+  return JSON.parse(text) as T;
+}
+
+const FIREBASE_JWKS_URL =
+  'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
+
+interface GoogleJwk extends JsonWebKey {
+  kid: string;
+}
+
+let cachedJwks: GoogleJwk[] | null = null;
+let cachedJwksFetchedAt = 0;
+const JWKS_TTL_MS = 3600 * 1000;
+
+async function fetchFirebaseJwks(forceRefresh = false): Promise<GoogleJwk[]> {
+  const now = Date.now();
+  if (!forceRefresh && cachedJwks && now - cachedJwksFetchedAt < JWKS_TTL_MS) {
+    return cachedJwks;
+  }
+
+  const res = await fetch(FIREBASE_JWKS_URL);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Firebase JWKS (${res.status})`);
+  }
+  const body = (await res.json()) as { keys?: GoogleJwk[] };
+  if (!Array.isArray(body.keys) || body.keys.length === 0) {
+    throw new Error('Firebase JWKS response contained no keys');
+  }
+  cachedJwks = body.keys;
+  cachedJwksFetchedAt = now;
+  return cachedJwks;
+}
+
+/**
+ * Vérifie la signature et les claims d'un Firebase ID Token côté Worker.
+ */
+export async function verifyFirebaseIdToken(
+  idToken: string,
+  projectId: string
+): Promise<{ uid: string; claims: Record<string, any> }> {
+  const parts = idToken.split('.');
+  if (parts.length !== 3) {
+    throw new Error('Invalid JWT format');
+  }
+
+  const [headerB64, payloadB64, signatureB64] = parts;
+  const header = decodeBase64UrlJson<{ alg?: string; kid?: string }>(headerB64);
+  if (header.alg !== 'RS256' || typeof header.kid !== 'string' || !header.kid) {
+    throw new Error('Unsupported JWT header');
+  }
+
+  const payload = decodeBase64UrlJson<Record<string, any>>(payloadB64);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const expectedIssuer = `https://securetoken.google.com/${projectId}`;
+
+  if (payload.aud !== projectId) {
+    throw new Error('Invalid JWT audience');
+  }
+  if (payload.iss !== expectedIssuer) {
+    throw new Error('Invalid JWT issuer');
+  }
+  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
+    throw new Error('Invalid JWT subject');
+  }
+  if (typeof payload.exp !== 'number' || payload.exp <= nowSec) {
+    throw new Error('JWT expired');
+  }
+  if (typeof payload.iat === 'number' && payload.iat > nowSec + 300) {
+    throw new Error('JWT issued in the future');
+  }
+
+  let keys = await fetchFirebaseJwks(false);
+  let jwk = keys.find(k => k.kid === header.kid);
+  if (!jwk && Date.now() - cachedJwksFetchedAt > 60_000) {
+    keys = await fetchFirebaseJwks(true);
+    jwk = keys.find(k => k.kid === header.kid);
+  }
+  if (!jwk) {
+    throw new Error('Matching JWKS key not found');
+  }
+
+  const verifyKey = await crypto.subtle.importKey(
+    'jwk',
+    jwk,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['verify']
+  );
+
+  const signatureBytes = decodeBase64UrlBytes(signatureB64);
+  const signedData = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+  const isValid = await crypto.subtle.verify(
+    'RSASSA-PKCS1-v1_5',
+    verifyKey,
+    signatureBytes,
+    signedData
+  );
+
+  if (!isValid) {
+    throw new Error('Invalid JWT signature');
+  }
+
+  return { uid: payload.sub, claims: payload };
 }
 
 /**

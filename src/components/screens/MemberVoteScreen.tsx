@@ -1,15 +1,24 @@
 import React, { useMemo, useState } from 'react';
-import type { Poll, UserProfile, ResponseStatus } from '../../types';
+import {
+  TRAINING_TYPE_LABELS,
+  type Poll,
+  type UserProfile,
+  type ResponseStatus,
+} from '../../types';
 import {
   CheckCircle2, HelpCircle, XCircle, Clock, Calendar,
-  Info, AlertCircle, Save, ArrowLeft, Loader2, Lock, AlertTriangle
+  Info, AlertCircle, Save, ArrowLeft, Loader2, Lock, AlertTriangle,
+  Gamepad2, Ban, Minus, Plus
 } from 'lucide-react';
 import { formatFRDateTime, formatShortFRDate } from '../../utils/dateUtils';
 
 interface MemberVoteScreenProps {
   poll: Poll;
   currentUser: UserProfile;
-  onSaveVotes: (votes: Record<string, ResponseStatus>) => Promise<void> | void;
+  onSaveVotes: (
+    votes: Record<string, ResponseStatus>,
+    desiredGames: number | null
+  ) => Promise<void> | void;
   onBack?: () => void;
 }
 
@@ -32,8 +41,20 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
     return map;
   }, [poll.slots, currentUser.id]);
 
+  // Souhait de parties déjà enregistré (ou 1 par défaut si jamais voté)
+  const hasSavedDesired = Object.prototype.hasOwnProperty.call(
+    poll.desiredGamesByUser || {},
+    currentUser.id
+  );
+  const savedDesiredGames = hasSavedDesired
+    ? poll.desiredGamesByUser[currentUser.id]
+    : 1;
+
   // Modifications locales en attente d'enregistrement
   const [draftVotes, setDraftVotes] = useState<Record<string, ResponseStatus>>({});
+  const [draftDesiredGames, setDraftDesiredGames] = useState<number | null | undefined>(
+    undefined
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -42,6 +63,8 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
     ...savedVotes,
     ...draftVotes,
   };
+  const effectiveDesiredGames: number | null =
+    draftDesiredGames !== undefined ? draftDesiredGames : savedDesiredGames;
 
   const handleVoteChange = (slotId: string, status: ResponseStatus) => {
     if (isClosed) return;
@@ -53,6 +76,13 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
     setSaveError(null);
   };
 
+  const handleDesiredChange = (value: number | null) => {
+    if (isClosed) return;
+    setDraftDesiredGames(value);
+    setSavedSuccess(false);
+    setSaveError(null);
+  };
+
   const handleSave = async () => {
     if (isClosed || isSaving) return;
     setIsSaving(true);
@@ -60,8 +90,9 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
     setSavedSuccess(false);
 
     try {
-      await onSaveVotes(effectiveVotes);
+      await onSaveVotes(effectiveVotes, effectiveDesiredGames);
       setDraftVotes({});
+      setDraftDesiredGames(undefined);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err: any) {
@@ -93,7 +124,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="bg-indigo-900/40 text-indigo-300 text-xs font-semibold px-2.5 py-0.5 rounded-lg border border-indigo-700/40">
-              {poll.type}
+              {TRAINING_TYPE_LABELS[poll.type] || poll.type}
             </span>
             {isClosed ? (
               <span className="text-xs text-slate-300 bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-700 flex items-center gap-1.5 font-medium">
@@ -117,7 +148,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
         <div>
           <h2 className="text-xl font-bold text-white">{poll.title}</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Indiquez votre disponibilité pour chaque créneau (2 matchs de 40 min = 1h20). Vous pouvez revenir modifier vos réponses jusqu'à la clôture.
+            Indiquez votre disponibilité pour chaque créneau (1 partie = 1 double session : 2 matchs de 40 min = 1h20).
           </p>
         </div>
 
@@ -125,29 +156,126 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
           <div className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 flex items-start gap-2.5">
             <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <p>
-              Ce sondage est clôturé — les votes ne sont plus modifiables. Vous pouvez consulter les résultats depuis le tableau de bord.
+              Ce sondage est clôturé — les votes ne sont plus modifiables. Vous pouvez consulter le planning dans Pilotage.
             </p>
           </div>
         ) : (
           <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 text-xs text-slate-300 flex items-start gap-2.5">
             <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
             <p className="text-slate-400">
-              Vos choix sont enregistrés sous votre compte Discord <strong className="text-slate-200">{currentUser.name}</strong>. Aucun choix n'est validé automatiquement sans votre confirmation.
+              Vos choix sont enregistrés sous votre compte Discord <strong className="text-slate-200">{currentUser.name}</strong>.
             </p>
           </div>
         )}
       </div>
 
+      {/* Objectif de parties sur la période */}
+      <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-lg space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-950/80 border border-indigo-700/50 flex items-center justify-center shrink-0">
+              <Gamepad2 className="w-4 h-4 text-indigo-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">
+                Combien de parties souhaitez-vous faire sur cette période ?
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                1 partie = une double session de 1h20. Utile pour répartir équitablement les joueurs.
+              </p>
+            </div>
+          </div>
+
+          <span className="text-xs font-semibold text-indigo-300 bg-indigo-950/80 px-3 py-1 rounded-lg border border-indigo-800/60 self-start sm:self-auto">
+            {effectiveDesiredGames === null
+              ? 'Illimité'
+              : effectiveDesiredGames === 0
+              ? '0 partie (ne joue pas)'
+              : `${effectiveDesiredGames} partie(s)`}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {[0, 1, 2, 3, 4, 5].map((num) => {
+            const active = effectiveDesiredGames === num;
+            return (
+              <button
+                key={num}
+                type="button"
+                disabled={isClosed}
+                onClick={() => handleDesiredChange(num)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition disabled:opacity-50 ${
+                  active
+                    ? 'bg-indigo-600 border-indigo-400 text-white shadow'
+                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                {num}
+              </button>
+            );
+          })}
+
+          <button
+            type="button"
+            disabled={isClosed}
+            onClick={() => handleDesiredChange(null)}
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition disabled:opacity-50 ${
+              effectiveDesiredGames === null
+                ? 'bg-emerald-600 border-emerald-400 text-white shadow'
+                : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
+            }`}
+          >
+            Illimité
+          </button>
+
+          {/* Ajustement fin - / + */}
+          <div className="ml-auto flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1">
+            <button
+              type="button"
+              disabled={isClosed || (effectiveDesiredGames !== null && effectiveDesiredGames <= 0)}
+              onClick={() =>
+                handleDesiredChange(
+                  effectiveDesiredGames === null ? 5 : Math.max(0, effectiveDesiredGames - 1)
+                )
+              }
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+              title="Diminuer"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-xs font-mono font-bold text-white w-8 text-center">
+              {effectiveDesiredGames === null ? '∞' : effectiveDesiredGames}
+            </span>
+            <button
+              type="button"
+              disabled={isClosed || (effectiveDesiredGames !== null && effectiveDesiredGames >= 15)}
+              onClick={() =>
+                handleDesiredChange(
+                  effectiveDesiredGames === null ? 1 : Math.min(15, effectiveDesiredGames + 1)
+                )
+              }
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+              title="Augmenter"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Slots List */}
       <div className="space-y-3">
         {poll.slots.map((slot) => {
+          const isSlotCancelled = Boolean(slot.cancelled);
           const currentVote = effectiveVotes[slot.id];
 
           return (
             <div
               key={slot.id}
               className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 transition shadow-lg space-y-4 ${
-                currentVote === 'DISPONIBLE'
+                isSlotCancelled
+                  ? 'border-red-900/40 bg-slate-950/60 opacity-65'
+                  : currentVote === 'DISPONIBLE'
                   ? 'border-emerald-500/40 bg-emerald-950/10'
                   : currentVote === 'INCERTAIN'
                   ? 'border-amber-500/40 bg-amber-950/10'
@@ -157,13 +285,17 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
               }`}
             >
               {/* Slot Header */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-800/80 pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center text-slate-300">
-                    <Calendar className="w-4 h-4 text-indigo-400" />
+                    {isSlotCancelled ? (
+                      <Ban className="w-4 h-4 text-red-400" />
+                    ) : (
+                      <Calendar className="w-4 h-4 text-indigo-400" />
+                    )}
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm text-white">
+                    <h4 className={`font-bold text-sm ${isSlotCancelled ? 'text-slate-400 line-through' : 'text-white'}`}>
                       {slot.dayName} {formatShortFRDate(slot.dateStr)}
                     </h4>
                     <span className="text-xs text-indigo-300 font-mono font-medium">
@@ -171,15 +303,21 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {isSlotCancelled && (
+                  <span className="text-[11px] bg-red-950/70 border border-red-800/60 text-red-300 px-2.5 py-1 rounded-lg self-start sm:self-auto">
+                    Annulé — {slot.cancelReason || 'Créneau indisponible'}
+                  </span>
+                )}
               </div>
 
               {/* 3 Action Buttons */}
               <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <button
                   type="button"
-                  disabled={isClosed}
+                  disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'DISPONIBLE')}
-                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed ${
+                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'DISPONIBLE'
                       ? 'bg-emerald-600 border-emerald-400 text-white shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-300'
@@ -191,9 +329,9 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
 
                 <button
                   type="button"
-                  disabled={isClosed}
+                  disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'INCERTAIN')}
-                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed ${
+                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'INCERTAIN'
                       ? 'bg-amber-600 border-amber-400 text-white shadow-lg shadow-amber-600/30 ring-2 ring-amber-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-amber-500/40 hover:text-amber-300'
@@ -205,9 +343,9 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
 
                 <button
                   type="button"
-                  disabled={isClosed}
+                  disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'INDISPONIBLE')}
-                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed ${
+                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'INDISPONIBLE'
                       ? 'bg-red-600 border-red-400 text-white shadow-lg shadow-red-600/30 ring-2 ring-red-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-red-500/40 hover:text-red-300'
@@ -233,7 +371,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
           ) : savedSuccess ? (
             <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              Réponses enregistrées avec succès !
+              Réponses et souhait de parties enregistrés !
             </span>
           ) : (
             <span className="text-xs text-slate-400 flex items-center gap-1.5">

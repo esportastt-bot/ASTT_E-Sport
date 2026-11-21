@@ -8,10 +8,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isCaptain() {
+    function isAdmin() {
       return isLoggedIn() && (
+        request.auth.token.is_admin == true ||
         request.auth.token.is_captain == true ||
-        request.auth.token.role == 'CAPTAIN'
+        request.auth.token.role == 'ADMIN'
       );
     }
 
@@ -23,35 +24,79 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/polls/$(pollId)).data.status == 'OPEN';
     }
 
+    function canReadPollDoc(data) {
+      return isAdmin() || (
+        isLoggedIn() && (
+          data.created_by == request.auth.uid ||
+          (data.target_user_ids is list && request.auth.uid in data.target_user_ids)
+        )
+      );
+    }
+
+    function isPollCreatorBefore(pollId) {
+      return isLoggedIn() &&
+        exists(/databases/$(database)/documents/polls/$(pollId)) &&
+        get(/databases/$(database)/documents/polls/$(pollId)).data.created_by == request.auth.uid;
+    }
+
+    function isPollCreatorAfter(pollId) {
+      return isLoggedIn() &&
+        existsAfter(/databases/$(database)/documents/polls/$(pollId)) &&
+        getAfter(/databases/$(database)/documents/polls/$(pollId)).data.created_by == request.auth.uid;
+    }
+
+    function canAccessPoll(pollId) {
+      return isAdmin() || (
+        isLoggedIn() &&
+        exists(/databases/$(database)/documents/polls/$(pollId)) &&
+        (
+          get(/databases/$(database)/documents/polls/$(pollId)).data.created_by == request.auth.uid ||
+          (
+            get(/databases/$(database)/documents/polls/$(pollId)).data.target_user_ids is list &&
+            request.auth.uid in get(/databases/$(database)/documents/polls/$(pollId)).data.target_user_ids
+          )
+        )
+      );
+    }
+
     // ── Members ──────────────────────────────────────────────────────────────
     match /members/{discordId} {
       allow read: if isLoggedIn();
-      allow write: if isOwner(discordId) || isCaptain();
+      allow write: if isOwner(discordId) || isAdmin();
+    }
+
+    // ── Profils de créneaux (ex: Profil HFGET) ───────────────────────────────
+    match /slot_profiles/{profileId} {
+      allow read: if isLoggedIn();
+      allow create: if isLoggedIn() && request.resource.data.created_by == request.auth.uid;
+      allow update, delete: if isAdmin() || (isLoggedIn() && resource.data.created_by == request.auth.uid);
     }
 
     // ── Polls ─────────────────────────────────────────────────────────────────
     match /polls/{pollId} {
-      allow read: if isLoggedIn();
-      allow create, update, delete: if isCaptain();
+      allow read: if canReadPollDoc(resource.data);
+      allow create: if isLoggedIn() && request.resource.data.created_by == request.auth.uid;
+      allow update, delete: if isAdmin() || (isLoggedIn() && resource.data.created_by == request.auth.uid);
 
-      // Slots : lecture pour tous les membres connectés, écriture uniquement capitaine
+      // Slots : lecture aux participants autorisés, écriture par créateur du sondage ou Admin
       match /slots/{slotId} {
-        allow read: if isLoggedIn();
-        allow write: if isCaptain();
+        allow read: if canAccessPoll(pollId);
+        allow create, update: if isAdmin() || isPollCreatorAfter(pollId);
+        allow delete: if isAdmin() || isPollCreatorBefore(pollId);
       }
 
-      // Responses : chaque membre écrit/modifie UNIQUEMENT ses propres réponses
-      // et uniquement si le sondage est ouvert
+      // Responses : chaque membre autorisé écrit UNIQUEMENT ses propres réponses si sondage ouvert
       match /responses/{userId} {
-        allow read: if isLoggedIn();
-        allow create, update: if isOwner(userId) && isPollOpen(pollId);
-        allow delete: if isCaptain();
+        allow read: if canAccessPoll(pollId);
+        allow create, update: if isOwner(userId) && isPollOpen(pollId) && canAccessPoll(pollId);
+        allow delete: if isAdmin() || isPollCreatorBefore(pollId);
       }
 
-      // Members du sondage : lecture tous, écriture par le membre concerné ou capitaine
+      // Members du sondage
       match /members/{userId} {
-        allow read: if isLoggedIn();
-        allow write: if isOwner(userId) || isCaptain();
+        allow read: if canAccessPoll(pollId);
+        allow create, update: if isOwner(userId) || isAdmin() || isPollCreatorAfter(pollId);
+        allow delete: if isOwner(userId) || isAdmin() || isPollCreatorBefore(pollId);
       }
     }
 
@@ -68,16 +113,16 @@ service cloud.firestore {
       allow update, delete: if isLoggedIn() && resource.data.discord_id == request.auth.uid;
     }
 
-    // ── Notification Events (lecture capitaine, écriture Worker/Admin) ───────
+    // ── Notification Events (lecture Admin, écriture Worker/Service Account) ──
     match /notification_events/{eventId} {
-      allow read: if isCaptain();
-      allow write: if false; // Uniquement via Service Account (Cloudflare Worker)
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // ── Settings ─────────────────────────────────────────────────────────────
     match /settings/{docId} {
       allow read: if isLoggedIn();
-      allow write: if isCaptain();
+      allow write: if isAdmin();
     }
   }
 }

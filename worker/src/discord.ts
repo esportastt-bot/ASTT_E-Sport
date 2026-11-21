@@ -3,12 +3,27 @@ export interface DiscordUser {
   username: string;
   global_name: string | null;
   avatar: string | null;
+  bot?: boolean;
 }
 
 export interface DiscordMember {
   user: DiscordUser;
   roles: string[];
   nick: string | null;
+}
+
+export interface DiscordGuildRole {
+  id: string;
+  name: string;
+  color: number;
+  position: number;
+  managed: boolean;
+}
+
+export interface DiscordGuildMemberRaw {
+  user?: DiscordUser;
+  nick: string | null;
+  roles: string[];
 }
 
 export class DiscordExchangeError extends Error {
@@ -22,7 +37,7 @@ export class DiscordExchangeError extends Error {
 }
 
 const DISCORD_HEADERS = {
-  'User-Agent': 'ASTT-Planning-Auth/1.0',
+  'User-Agent': 'DiscordBot (https://esportastt-bot.github.io/ASTT_E-Sport, 1.0)',
 };
 
 /** Échange le code OAuth2 contre un access token Discord */
@@ -92,6 +107,62 @@ export async function getGuildMember(
     throw new Error(`Failed to fetch guild member (${response.status}): ${err}`);
   }
   return response.json() as Promise<DiscordMember>;
+}
+
+/** Récupère tous les rôles du serveur Discord via le Bot Token */
+export async function getGuildRoles(
+  botToken: string,
+  guildId: string
+): Promise<DiscordGuildRole[]> {
+  const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/roles`, {
+    headers: {
+      ...DISCORD_HEADERS,
+      Authorization: `Bot ${botToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Failed to fetch guild roles (${response.status}): ${err}`);
+  }
+
+  return response.json() as Promise<DiscordGuildRole[]>;
+}
+
+/** Récupère tous les membres du serveur Discord via le Bot Token (avec pagination) */
+export async function getAllGuildMembers(
+  botToken: string,
+  guildId: string
+): Promise<DiscordGuildMemberRaw[]> {
+  const all: DiscordGuildMemberRaw[] = [];
+  let after = '0';
+
+  for (let page = 0; page < 10; page++) {
+    const response = await fetch(
+      `https://discord.com/api/v10/guilds/${guildId}/members?limit=1000&after=${after}`,
+      {
+        headers: {
+          ...DISCORD_HEADERS,
+          Authorization: `Bot ${botToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Failed to fetch guild members (${response.status}): ${err}`);
+    }
+
+    const batch = (await response.json()) as DiscordGuildMemberRaw[];
+    all.push(...batch);
+
+    if (batch.length < 1000) break;
+    const lastId = batch[batch.length - 1]?.user?.id;
+    if (!lastId || lastId === after) break;
+    after = lastId;
+  }
+
+  return all;
 }
 
 /** Génère l'URL d'avatar Discord (BigInt safe pour snowflakes 64 bits) */
