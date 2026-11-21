@@ -17,7 +17,7 @@ import {
   type DocumentData,
 } from 'firebase/firestore';
 import { db } from './config';
-import type { Poll, TimeSlot, ResponseStatus } from '../types';
+import type { Poll, TimeSlot, ResponseStatus, TrainingType } from '../types';
 
 const POLLS_COL = 'polls';
 
@@ -34,6 +34,7 @@ export interface PollSlotSelection {
   endTime: string;
   minParticipants?: number;
   maxParticipants?: number;
+  trainingType?: TrainingType;
   selectedIds: string[];
   waitlistIds: string[];
   teamAssignments: Record<string, 'A' | 'B'>;
@@ -148,6 +149,10 @@ async function hydratePollDocuments(
             typeof d.min_participants === 'number' ? d.min_participants : undefined,
           maxParticipants:
             typeof d.max_participants === 'number' ? d.max_participants : undefined,
+          trainingType:
+            typeof d.training_type === 'string'
+              ? (d.training_type as TrainingType)
+              : undefined,
           disponibles: votes.disponibles,
           incertains: votes.incertains,
           indisponibles: votes.indisponibles,
@@ -219,6 +224,7 @@ export async function createPoll(
       end_time: slot.endTime,
       min_participants: slot.minParticipants ?? pollData.minParticipants,
       max_participants: slot.maxParticipants ?? pollData.maxParticipants,
+      training_type: slot.trainingType ?? pollData.type,
       min_notified: false,
       sub_min_notified: false,
       selected_user_ids: [],
@@ -364,6 +370,10 @@ export function subscribeToPollSlots(
             typeof d.min_participants === 'number' ? d.min_participants : undefined,
           maxParticipants:
             typeof d.max_participants === 'number' ? d.max_participants : undefined,
+          trainingType:
+            typeof d.training_type === 'string'
+              ? (d.training_type as TrainingType)
+              : undefined,
           selectedIds: Array.isArray(d.selected_user_ids) ? d.selected_user_ids : [],
           waitlistIds: Array.isArray(d.waitlist_user_ids) ? d.waitlist_user_ids : [],
           teamAssignments:
@@ -468,6 +478,7 @@ export async function updateSlotDetails(
     endTime: string;
     minParticipants: number;
     maxParticipants: number;
+    trainingType: TrainingType;
   }>
 ): Promise<void> {
   const payload: Record<string, any> = {};
@@ -480,6 +491,7 @@ export async function updateSlotDetails(
   if (changes.endTime !== undefined) payload.end_time = changes.endTime;
   if (changes.minParticipants !== undefined) payload.min_participants = changes.minParticipants;
   if (changes.maxParticipants !== undefined) payload.max_participants = changes.maxParticipants;
+  if (changes.trainingType !== undefined) payload.training_type = changes.trainingType;
 
   await updateDoc(doc(db, POLLS_COL, pollId, 'slots', slotId), payload);
 }
@@ -496,6 +508,7 @@ export async function batchSavePollSlots(
     cancelReason?: string;
     minParticipants?: number;
     maxParticipants?: number;
+    trainingType?: TrainingType;
   }>
 ): Promise<void> {
   if (updates.length === 0) return;
@@ -511,6 +524,7 @@ export async function batchSavePollSlots(
     if (item.cancelReason !== undefined) payload.cancel_reason = item.cancelReason;
     if (item.minParticipants !== undefined) payload.min_participants = item.minParticipants;
     if (item.maxParticipants !== undefined) payload.max_participants = item.maxParticipants;
+    if (item.trainingType !== undefined) payload.training_type = item.trainingType;
     batch.update(slotRef, payload);
   }
   await batch.commit();
@@ -526,6 +540,7 @@ export async function addSlotToPoll(
     endTime: string;
     minParticipants?: number;
     maxParticipants?: number;
+    trainingType?: TrainingType;
   }
 ): Promise<string> {
   const created = await addDoc(collection(db, POLLS_COL, pollId, 'slots'), {
@@ -539,6 +554,7 @@ export async function addSlotToPoll(
     ...(typeof slot.maxParticipants === 'number'
       ? { max_participants: slot.maxParticipants }
       : {}),
+    ...(slot.trainingType ? { training_type: slot.trainingType } : {}),
     min_notified: false,
     sub_min_notified: false,
     selected_user_ids: [],

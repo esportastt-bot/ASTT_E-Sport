@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  TRAINING_TYPE_BADGE_CLASSES,
   TRAINING_TYPE_LABELS,
   type Poll,
+  type TrainingType,
   type UserProfile,
   type ResponseStatus,
 } from '../../types';
@@ -130,9 +132,21 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
       <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="bg-indigo-900/40 text-indigo-300 text-xs font-semibold px-2.5 py-0.5 rounded-lg border border-indigo-700/40">
-              {TRAINING_TYPE_LABELS[poll.type] || poll.type}
-            </span>
+            {Array.from(
+              new Set(
+                (poll.slots.filter((s) => !s.cancelled).length > 0
+                  ? poll.slots.filter((s) => !s.cancelled)
+                  : poll.slots
+                ).map((s) => s.trainingType || poll.type)
+              )
+            ).map((t: TrainingType) => (
+              <span
+                key={t}
+                className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg border ${TRAINING_TYPE_BADGE_CLASSES[t] || 'bg-indigo-900/40 text-indigo-300 border-indigo-700/40'}`}
+              >
+                {TRAINING_TYPE_LABELS[t] || t}
+              </span>
+            ))}
             {isClosed ? (
               <span className="text-xs text-slate-300 bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-700 flex items-center gap-1.5 font-medium">
                 <Lock className="w-3 h-3 text-amber-400" />
@@ -312,16 +326,28 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                   </div>
                 </div>
 
-                {isSlotCancelled ? (
-                  <span className="text-[11px] bg-red-950/70 border border-red-800/60 text-red-300 px-2.5 py-1 rounded-lg">
-                    Annulé — {slot.cancelReason || 'Créneau indisponible'}
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-slate-400 bg-slate-950/70 border border-slate-800 px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0">
-                    <Users className="w-3 h-3 text-slate-400" />
-                    {slotMin}–{slotMax} joueurs
-                  </span>
-                )}
+                <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                  {(() => {
+                    const slotType = slot.trainingType || poll.type;
+                    return (
+                      <span
+                        className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg border ${TRAINING_TYPE_BADGE_CLASSES[slotType] || 'bg-indigo-900/40 text-indigo-300 border-indigo-700/40'}`}
+                      >
+                        {TRAINING_TYPE_LABELS[slotType] || slotType}
+                      </span>
+                    );
+                  })()}
+                  {isSlotCancelled ? (
+                    <span className="text-[11px] bg-red-950/70 border border-red-800/60 text-red-300 px-2.5 py-1 rounded-lg">
+                      Annulé — {slot.cancelReason || 'Créneau indisponible'}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400 bg-slate-950/70 border border-slate-800 px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0">
+                      <Users className="w-3 h-3 text-slate-400" />
+                      {slotMin}–{slotMax} joueurs
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* 3 Action Buttons (Touch-friendly) */}

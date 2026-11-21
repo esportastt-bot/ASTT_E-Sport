@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  TRAINING_TYPE_BADGE_CLASSES,
   TRAINING_TYPE_LABELS,
   type GuildMember,
   type Poll,
+  type TrainingType,
   type UserProfile,
 } from '../../types';
 import type { MemberProfile } from '../../firebase/members';
@@ -42,6 +44,7 @@ interface OrganizerCockpitScreenProps {
       cancelReason: string;
       minParticipants: number;
       maxParticipants: number;
+      trainingType: TrainingType;
     }>
   ) => Promise<void>;
   onSaveSlotPlanBatch: (
@@ -53,6 +56,7 @@ interface OrganizerCockpitScreenProps {
       teamAssignments?: Record<string, 'A' | 'B'>;
       minParticipants?: number;
       maxParticipants?: number;
+      trainingType?: TrainingType;
     }>
   ) => Promise<void>;
   onAddSlot: (
@@ -64,6 +68,7 @@ interface OrganizerCockpitScreenProps {
       endTime: string;
       minParticipants?: number;
       maxParticipants?: number;
+      trainingType?: TrainingType;
     }
   ) => Promise<string>;
   onRemoveSlot: (pollId: string, slotId: string) => Promise<void>;
@@ -81,12 +86,15 @@ interface OrganizerCockpitScreenProps {
   onBack?: () => void;
 }
 
+const TRAINING_TYPES: TrainingType[] = ['ASTT', 'MIX', 'SCRIM', 'ENTRAINEMENT'];
+
 interface SlotDraft {
   selectedIds: string[];
   waitlistIds: string[];
   teamAssignments: Record<string, 'A' | 'B'>;
   minParticipants: number;
   maxParticipants: number;
+  trainingType: TrainingType;
 }
 
 const FR_WEEKDAYS = [
@@ -165,6 +173,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   const [newSlotEnd, setNewSlotEnd] = useState('21:50');
   const [newSlotMin, setNewSlotMin] = useState(4);
   const [newSlotMax, setNewSlotMax] = useState(8);
+  const [newSlotType, setNewSlotType] = useState<TrainingType>('ASTT');
   const [addingSlot, setAddingSlot] = useState(false);
 
   const [showQuickSettings, setShowQuickSettings] = useState(false);
@@ -264,10 +273,12 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     const draft = draftsBySlot[slot.id];
     const slotMin = draft?.minParticipants ?? slot.minParticipants ?? poll.minParticipants;
     const slotMax = draft?.maxParticipants ?? slot.maxParticipants ?? poll.maxParticipants;
+    const slotType: TrainingType = draft?.trainingType ?? slot.trainingType ?? poll.type;
     return {
       ...slot,
       minParticipants: slotMin,
       maxParticipants: slotMax,
+      trainingType: slotType,
       selectedIds: draft ? draft.selectedIds : slot.selectedIds,
       waitlistIds: draft ? draft.waitlistIds : slot.waitlistIds,
       teamAssignments: draft ? draft.teamAssignments : slot.teamAssignments || {},
@@ -383,6 +394,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       teamAssignments: base?.teamAssignments || {},
       minParticipants: base?.minParticipants ?? poll.minParticipants,
       maxParticipants: base?.maxParticipants ?? poll.maxParticipants,
+      trainingType: base?.trainingType ?? poll.type,
     };
     setDraftsBySlot((prev) => ({
       ...prev,
@@ -458,6 +470,13 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }));
   };
 
+  const updateSlotTrainingTypeDraft = (slotId: string, trainingType: TrainingType) => {
+    updateSlotDraft(slotId, (cur) => ({
+      ...cur,
+      trainingType,
+    }));
+  };
+
   const handleRunOptimizer = () => {
     if (!canEdit) return;
     const result = generateOptimalSchedule(poll, monthlyOtherGames);
@@ -471,6 +490,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         teamAssignments: prop.teamAssignments,
         minParticipants: base?.minParticipants ?? poll.minParticipants,
         maxParticipants: base?.maxParticipants ?? poll.maxParticipants,
+        trainingType: base?.trainingType ?? poll.type,
       };
     });
 
@@ -502,6 +522,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         teamAssignments: draft.teamAssignments,
         minParticipants: draft.minParticipants,
         maxParticipants: draft.maxParticipants,
+        trainingType: draft.trainingType,
       });
       setDraftsBySlot((prev) => {
         const copy = { ...prev };
@@ -535,6 +556,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         teamAssignments: draftsBySlot[sid].teamAssignments,
         minParticipants: draftsBySlot[sid].minParticipants,
         maxParticipants: draftsBySlot[sid].maxParticipants,
+        trainingType: draftsBySlot[sid].trainingType,
       }));
       await onSaveSlotPlanBatch(poll.id, updates);
       setDraftsBySlot({});
@@ -603,6 +625,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         endTime: newSlotEnd,
         minParticipants: newSlotMin,
         maxParticipants: newSlotMax,
+        trainingType: newSlotType,
       });
       setShowAddSlotForm(false);
       showToast('Nouveau créneau ajouté au sondage.');
@@ -651,11 +674,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   };
 
   const handleCopyDiscordSummary = async () => {
-    const lines: string[] = [
-      `📅 **${poll.title}** (${TRAINING_TYPE_LABELS[poll.type] || poll.type})`,
-      '',
-    ];
-
     const slotsToExport = resolvedSlots
       .filter(
         (s) =>
@@ -665,9 +683,19 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       .sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.startTime.localeCompare(b.startTime));
 
     const targetList = slotsToExport.length > 0 ? slotsToExport : activeSlots;
+    const distinctTypes = Array.from(
+      new Set(targetList.map((s) => TRAINING_TYPE_LABELS[s.trainingType || poll.type]))
+    );
+    const lines: string[] = [
+      `📅 **${poll.title}**${distinctTypes.length > 0 ? ` (${distinctTypes.join(' / ')})` : ''}`,
+      '',
+    ];
 
     for (const s of targetList) {
-      lines.push(`**• ${s.dayName} ${formatShortFRDate(s.dateStr)} — ${s.startTime} à ${s.endTime}**`);
+      const slotTypeLabel = TRAINING_TYPE_LABELS[s.trainingType || poll.type] || poll.type;
+      lines.push(
+        `**• [${slotTypeLabel}] ${s.dayName} ${formatShortFRDate(s.dateStr)} — ${s.startTime} à ${s.endTime}**`
+      );
       if (s.selectedIds.length > 0) {
         const teamA = s.selectedIds.filter((id) => s.teamAssignments[id] === 'A');
         const teamB = s.selectedIds.filter((id) => s.teamAssignments[id] === 'B');
@@ -830,17 +858,31 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
       {/* Header Sondage + KPIs */}
       <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="space-y-1">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+          <div className="space-y-2.5 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="bg-indigo-900/40 text-indigo-300 text-xs font-semibold px-2.5 py-0.5 rounded-lg border border-indigo-700/40">
-                {TRAINING_TYPE_LABELS[poll.type] || poll.type}
-              </span>
+              {Array.from(
+                new Set(
+                  (resolvedSlots.filter((s) => !s.cancelled).length > 0
+                    ? resolvedSlots.filter((s) => !s.cancelled)
+                    : resolvedSlots
+                  ).map((s) => s.trainingType || poll.type)
+                )
+              ).map((t) => (
+                <span
+                  key={t}
+                  className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg border ${TRAINING_TYPE_BADGE_CLASSES[t] || 'bg-indigo-900/40 text-indigo-300 border-indigo-700/40'}`}
+                >
+                  {TRAINING_TYPE_LABELS[t] || t}
+                </span>
+              ))}
               <span className="text-xs text-slate-400">
                 Créé par <strong className="text-slate-200">{poll.createdByName || 'Organisateur'}</strong>
               </span>
             </div>
-            <h2 className="text-lg sm:text-xl font-bold text-white leading-snug">{poll.title}</h2>
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-tight border-l-4 border-indigo-500 pl-3 sm:pl-4 break-words">
+              {poll.title}
+            </h2>
           </div>
 
           <div className="text-xs text-slate-400 space-y-1 sm:text-right">
@@ -930,6 +972,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                   if (!newSlotDate) setNewSlotDate(poll.startDate || '');
                   setNewSlotMin(poll.minParticipants);
                   setNewSlotMax(poll.maxParticipants);
+                  setNewSlotType(poll.type);
                 }}
                 className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
               >
@@ -1017,6 +1060,20 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                 onChange={(e) => setNewSlotEnd(e.target.value)}
                 className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
               />
+            </div>
+            <div className="space-y-1">
+              <label className="text-slate-400 block">Type</label>
+              <select
+                value={newSlotType}
+                onChange={(e) => setNewSlotType(e.target.value as TrainingType)}
+                className={`bg-slate-900 border rounded-lg px-2.5 py-1.5 font-semibold focus:outline-none ${TRAINING_TYPE_BADGE_CLASSES[newSlotType]}`}
+              >
+                {TRAINING_TYPES.map((t) => (
+                  <option key={t} value={t} className="bg-slate-900 text-white">
+                    {TRAINING_TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1">
               <label className="text-slate-400 block">Min</label>
@@ -1329,6 +1386,11 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                         <span className="text-xs text-indigo-300 font-mono font-medium">
                           ({slot.startTime} - {slot.endTime})
                         </span>
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${TRAINING_TYPE_BADGE_CLASSES[slot.trainingType] || 'bg-indigo-900/40 text-indigo-300 border-indigo-700/40'}`}
+                        >
+                          {TRAINING_TYPE_LABELS[slot.trainingType] || slot.trainingType}
+                        </span>
                         <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full">
                           Min {slotMin} · Max {slotMax}
                         </span>
@@ -1386,7 +1448,27 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                       {canEdit && (
                         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                           <div className="flex flex-wrap items-center gap-2">
-                            <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
+                            <div className="flex flex-wrap items-center gap-2 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
+                              <label className="flex items-center gap-1 text-slate-300">
+                                <span className="text-slate-400">Type</span>
+                                <select
+                                  value={slot.trainingType}
+                                  onChange={(e) =>
+                                    updateSlotTrainingTypeDraft(
+                                      slot.id,
+                                      e.target.value as TrainingType
+                                    )
+                                  }
+                                  className={`bg-slate-900 border rounded px-1.5 py-0.5 text-[11px] font-semibold focus:outline-none ${TRAINING_TYPE_BADGE_CLASSES[slot.trainingType]}`}
+                                  aria-label="Type de session"
+                                >
+                                  {TRAINING_TYPES.map((t) => (
+                                    <option key={t} value={t} className="bg-slate-900 text-white">
+                                      {TRAINING_TYPE_LABELS[t]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
                               <label className="flex items-center gap-1 text-slate-300">
                                 <span className="text-slate-400">Min</span>
                                 <input

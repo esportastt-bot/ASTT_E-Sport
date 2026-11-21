@@ -1,5 +1,11 @@
 import React, { useState } from 'react';
-import { TRAINING_TYPE_LABELS, type Poll, type UserProfile } from '../../types';
+import {
+  TRAINING_TYPE_BADGE_CLASSES,
+  TRAINING_TYPE_LABELS,
+  type Poll,
+  type TrainingType,
+  type UserProfile,
+} from '../../types';
 import {
   PlusCircle, Clock, Users, ArrowRight, CheckCircle2,
   AlertCircle, Trash2, Ban, MoreVertical, Calendar, Loader2,
@@ -205,9 +211,21 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   {/* Top row : Badges + Actions (en flex sans recouvrement) */}
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                      <span className="bg-indigo-900/40 text-indigo-300 text-xs font-semibold px-2.5 py-0.5 rounded-lg border border-indigo-700/40">
-                        {TRAINING_TYPE_LABELS[poll.type] || poll.type}
-                      </span>
+                      {Array.from(
+                        new Set(
+                          (poll.slots.filter((s) => !s.cancelled).length > 0
+                            ? poll.slots.filter((s) => !s.cancelled)
+                            : poll.slots
+                          ).map((s) => s.trainingType || poll.type)
+                        )
+                      ).map((t: TrainingType) => (
+                        <span
+                          key={t}
+                          className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg border ${TRAINING_TYPE_BADGE_CLASSES[t] || 'bg-indigo-900/40 text-indigo-300 border-indigo-700/40'}`}
+                        >
+                          {TRAINING_TYPE_LABELS[t] || t}
+                        </span>
+                      ))}
                       <span className="bg-emerald-900/30 text-emerald-400 text-xs font-medium px-2 py-0.5 rounded-lg border border-emerald-700/30 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                         Ouvert

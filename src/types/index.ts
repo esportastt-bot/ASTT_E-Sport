@@ -15,6 +15,13 @@ export const TRAINING_TYPE_LABELS: Record<TrainingType, string> = {
   ENTRAINEMENT: 'Entraînement',
 };
 
+export const TRAINING_TYPE_BADGE_CLASSES: Record<TrainingType, string> = {
+  MIX: 'bg-sky-900/40 text-sky-300 border-sky-700/40',
+  SCRIM: 'bg-rose-900/40 text-rose-300 border-rose-700/40',
+  ASTT: 'bg-indigo-900/40 text-indigo-300 border-indigo-700/40',
+  ENTRAINEMENT: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/40',
+};
+
 export type PeriodType = '1_week' | '2_weeks' | '1_month' | 'custom';
 export type ResponseStatus = 'DISPONIBLE' | 'INCERTAIN' | 'INDISPONIBLE';
 export type SlotStatus = 'BELOW_MIN' | 'MIN_REACHED' | 'FULL' | 'EXCEEDED';
@@ -27,6 +34,7 @@ export interface TimeSlot {
   endTime: string;   // HH:MM
   minParticipants?: number;
   maxParticipants?: number;
+  trainingType?: TrainingType;
   disponibles: string[]; // user ids
   incertains: string[];
   indisponibles: string[];
@@ -84,6 +92,7 @@ export interface SlotProfileDay {
     endTime: string;
     minParticipants?: number;
     maxParticipants?: number;
+    trainingType?: TrainingType;
   }>;
 }
 

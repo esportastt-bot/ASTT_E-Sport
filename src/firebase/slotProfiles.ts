@@ -8,7 +8,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './config';
-import type { SlotProfile } from '../types';
+import type { SlotProfile, TrainingType } from '../types';
 
 const SLOT_PROFILES_COL = 'slot_profiles';
 
@@ -34,6 +34,9 @@ export function subscribeToSlotProfiles(
                   : {}),
                 ...(typeof s?.maxParticipants === 'number'
                   ? { maxParticipants: s.maxParticipants }
+                  : {}),
+                ...(typeof s?.trainingType === 'string'
+                  ? { trainingType: s.trainingType as TrainingType }
                   : {}),
               }))
             : [],
@@ -82,6 +85,7 @@ export async function saveSlotProfile(
         ...(typeof s.maxParticipants === 'number'
           ? { maxParticipants: s.maxParticipants }
           : {}),
+        ...(s.trainingType ? { trainingType: s.trainingType } : {}),
       })),
     })),
     training_type: profile.trainingType || null,

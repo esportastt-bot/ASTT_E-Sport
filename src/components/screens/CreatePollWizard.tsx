@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  TRAINING_TYPE_BADGE_CLASSES,
   TRAINING_TYPE_LABELS,
   type SlotProfile,
   type TrainingType,
@@ -18,6 +19,27 @@ import {
   getWeekNumber, DAYS_CONFIG
 } from '../../utils/dateUtils';
 
+const TRAINING_TYPES: TrainingType[] = ['ASTT', 'MIX', 'SCRIM', 'ENTRAINEMENT'];
+const MONTHS_FR = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+];
+const CALENDAR_WEEKDAYS = [
+  { short: 'L', full: 'Lun' },
+  { short: 'M', full: 'Mar' },
+  { short: 'M', full: 'Mer' },
+  { short: 'J', full: 'Jeu' },
+  { short: 'V', full: 'Ven' },
+  { short: 'S', full: 'Sam' },
+  { short: 'D', full: 'Dim' },
+];
+
+function formatDefaultPollTitle(monday: Date): string {
+  const num = getWeekNumber(monday);
+  const sun = addDays(monday, 6);
+  return `Entraînements Semaine ${num} (du ${formatFRDate(monday)} au ${formatFRDate(sun)})`;
+}
+
 interface CreatePollWizardProps {
   currentUser: UserProfile;
   onDirtyChange?: (dirty: boolean) => void;
@@ -30,6 +52,7 @@ interface DaySlotForm {
   endTime: string;
   minParticipants: number;
   maxParticipants: number;
+  trainingType: TrainingType;
 }
 
 interface DayConfig {
@@ -74,16 +97,18 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
   const [selectedMonday, setSelectedMonday] = useState<Date>(() =>
     addDays(getMonday(new Date()), 7)
   );
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
+    const initialMonday = addDays(getMonday(new Date()), 7);
+    return new Date(initialMonday.getFullYear(), initialMonday.getMonth(), 1);
+  });
 
   const weekNum = getWeekNumber(selectedMonday);
   const sundayDate = addDays(selectedMonday, 6);
   const weekLabel = `Semaine ${weekNum} (du ${formatFRDate(selectedMonday)} au ${formatFRDate(sundayDate)})`;
 
   // Form State
-  const [title, setTitle] = useState(`Entraînements ${weekLabel}`);
-  const [trainingType, setTrainingType] = useState<TrainingType>('ASTT');
-  const [minParticipants, setMinParticipants] = useState(4);
-  const [maxParticipants, setMaxParticipants] = useState(8);
+  const [title, setTitle] = useState(() => formatDefaultPollTitle(addDays(getMonday(new Date()), 7)));
+  const [isCustomTitle, setIsCustomTitle] = useState(false);
 
   // Configuration des jours et créneaux individuels
   const [days, setDays] = useState<DayConfig[]>(() => {
@@ -97,7 +122,15 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         dayName: d.dayName,
         active: isWeekday,
         slots: isWeekday
-          ? [{ startTime: '20:30', endTime: '21:50', minParticipants: 4, maxParticipants: 8 }]
+          ? [
+              {
+                startTime: '20:30',
+                endTime: '21:50',
+                minParticipants: 4,
+                maxParticipants: 8,
+                trainingType: 'ASTT',
+              },
+            ]
           : [],
       };
     });
@@ -126,10 +159,10 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
 
   const applyWeekMonday = (newMonday: Date) => {
     setSelectedMonday(newMonday);
-    const newWeekNum = getWeekNumber(newMonday);
-    const newSunday = addDays(newMonday, 6);
-    const newLabel = `Semaine ${newWeekNum} (du ${formatFRDate(newMonday)} au ${formatFRDate(newSunday)})`;
-    setTitle(`Entraînements ${newLabel}`);
+    setCalendarMonth(new Date(newMonday.getFullYear(), newMonday.getMonth(), 1));
+    if (!isCustomTitle) {
+      setTitle(formatDefaultPollTitle(newMonday));
+    }
     setDeadlineDate(formatISODate(addDays(newMonday, -1)));
 
     setDays((prev) =>
@@ -149,38 +182,63 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
     applyWeekMonday(addDays(selectedMonday, offsetWeeks * 7));
   };
 
-  const updateDefaultMin = (nextVal: number) => {
-    const prevDefault = minParticipants;
-    setMinParticipants(nextVal);
-    setDays((prev) =>
-      prev.map((d) => ({
-        ...d,
-        slots: d.slots.map((s) =>
-          s.minParticipants === prevDefault ? { ...s, minParticipants: nextVal } : s
-        ),
-      }))
-    );
-    markDirty();
+  const shiftCalendarMonth = (offsetMonths: number) => {
+    setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + offsetMonths, 1));
   };
 
-  const updateDefaultMax = (nextVal: number) => {
-    const prevDefault = maxParticipants;
-    setMaxParticipants(nextVal);
-    setDays((prev) =>
-      prev.map((d) => ({
-        ...d,
-        slots: d.slots.map((s) =>
-          s.maxParticipants === prevDefault ? { ...s, maxParticipants: nextVal } : s
-        ),
-      }))
-    );
-    markDirty();
-  };
+  const [todayIso] = useState(() => formatISODate(new Date()));
+  const selectedMondayIso = formatISODate(selectedMonday);
+
+  const calendarWeeks = useMemo(() => {
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
+    const firstOfMonth = new Date(year, month, 1);
+    const gridStart = getMonday(firstOfMonth);
+    const weeks: Array<{
+      weekNum: number;
+      monday: Date;
+      mondayIso: string;
+      isSelected: boolean;
+      days: Array<{
+        date: Date;
+        iso: string;
+        dayNumber: number;
+        inMonth: boolean;
+        isToday: boolean;
+      }>;
+    }> = [];
+
+    for (let row = 0; row < 6; row++) {
+      const monday = addDays(gridStart, row * 7);
+      if (row === 5 && monday.getMonth() !== month) break;
+      const mondayIso = formatISODate(monday);
+      const weekDays = Array.from({ length: 7 }, (_, col) => {
+        const d = addDays(monday, col);
+        const iso = formatISODate(d);
+        return {
+          date: d,
+          iso,
+          dayNumber: d.getDate(),
+          inMonth: d.getMonth() === month,
+          isToday: iso === todayIso,
+        };
+      });
+      weeks.push({
+        weekNum: getWeekNumber(monday),
+        monday,
+        mondayIso,
+        isSelected: mondayIso === selectedMondayIso,
+        days: weekDays,
+      });
+    }
+    return weeks;
+  }, [calendarMonth, selectedMondayIso, todayIso]);
 
   // Charger un profil (ex: Profil HFGET)
   const handleLoadSlotProfile = (profile: SlotProfile) => {
-    const defMin = typeof profile.minParticipants === 'number' ? profile.minParticipants : minParticipants;
-    const defMax = typeof profile.maxParticipants === 'number' ? profile.maxParticipants : maxParticipants;
+    const defMin = typeof profile.minParticipants === 'number' ? profile.minParticipants : 4;
+    const defMax = typeof profile.maxParticipants === 'number' ? profile.maxParticipants : 8;
+    const defType: TrainingType = profile.trainingType || 'ASTT';
 
     setDays((prev) =>
       prev.map((day) => {
@@ -194,16 +252,14 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
             endTime: s.endTime || '21:50',
             minParticipants: typeof s.minParticipants === 'number' ? s.minParticipants : defMin,
             maxParticipants: typeof s.maxParticipants === 'number' ? s.maxParticipants : defMax,
+            trainingType: s.trainingType || defType,
           })),
         };
       })
     );
-    if (profile.trainingType) setTrainingType(profile.trainingType);
-    if (typeof profile.minParticipants === 'number') setMinParticipants(profile.minParticipants);
-    if (typeof profile.maxParticipants === 'number') setMaxParticipants(profile.maxParticipants);
     setLoadedProfileName(profile.name);
     setProfileMessage(
-      `Profil « ${profile.name} » chargé. Vous pouvez maintenant modifier librement chaque jour, horaire ou min/max.`
+      `Profil « ${profile.name} » chargé. Vous pouvez maintenant modifier librement chaque jour, type, horaire ou min/max.`
     );
     markDirty();
   };
@@ -221,15 +277,16 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           p.name.toLowerCase() === cleanName.toLowerCase() &&
           (currentUser.isAdmin || p.createdBy === currentUser.id)
       );
+      const firstActiveSlot = days.flatMap((d) => (d.active ? d.slots : []))[0];
 
       await saveProfile({
         id: existing?.id,
         name: cleanName,
         createdBy: existing?.createdBy || currentUser.id,
         createdByName: existing?.createdByName || currentUser.name,
-        trainingType,
-        minParticipants,
-        maxParticipants,
+        trainingType: firstActiveSlot?.trainingType || 'ASTT',
+        minParticipants: firstActiveSlot?.minParticipants ?? 4,
+        maxParticipants: firstActiveSlot?.maxParticipants ?? 8,
         days: days.map((d) => ({
           dayName: d.dayName,
           active: d.active,
@@ -238,6 +295,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
             endTime: s.endTime,
             minParticipants: s.minParticipants,
             maxParticipants: s.maxParticipants,
+            trainingType: s.trainingType,
           })),
         })),
       });
@@ -272,7 +330,15 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         active: newActive,
         slots:
           newActive && target.slots.length === 0
-            ? [{ startTime: '20:30', endTime: '21:50', minParticipants, maxParticipants }]
+            ? [
+                {
+                  startTime: '20:30',
+                  endTime: '21:50',
+                  minParticipants: 4,
+                  maxParticipants: 8,
+                  trainingType: 'ASTT',
+                },
+              ]
             : target.slots,
       };
       return copy;
@@ -280,7 +346,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
     markDirty();
   };
 
-  // Ajouter un créneau à un jour spécifique (hérite du min/max du jour ou des valeurs par défaut)
+  // Ajouter un créneau à un jour spécifique (hérite du type et du min/max du jour ou des valeurs par défaut)
   const addSlotToDay = (dayIndex: number) => {
     setDays((prev) => {
       const copy = [...prev];
@@ -300,8 +366,9 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           {
             startTime: newStart,
             endTime: newEnd,
-            minParticipants: lastSlot?.minParticipants ?? minParticipants,
-            maxParticipants: lastSlot?.maxParticipants ?? maxParticipants,
+            minParticipants: lastSlot?.minParticipants ?? 4,
+            maxParticipants: lastSlot?.maxParticipants ?? 8,
+            trainingType: lastSlot?.trainingType ?? 'ASTT',
           },
         ],
       };
@@ -371,6 +438,35 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       copy[dayIndex] = {
         ...target,
         slots: target.slots.map((s) => ({ ...s, [field]: value })),
+      };
+      return copy;
+    });
+    markDirty();
+  };
+
+  const updateSlotTrainingType = (
+    dayIndex: number,
+    slotIndex: number,
+    value: TrainingType
+  ) => {
+    setDays((prev) => {
+      const copy = [...prev];
+      const target = copy[dayIndex];
+      const newSlots = [...target.slots];
+      newSlots[slotIndex] = { ...newSlots[slotIndex], trainingType: value };
+      copy[dayIndex] = { ...target, slots: newSlots };
+      return copy;
+    });
+    markDirty();
+  };
+
+  const applyDayTrainingType = (dayIndex: number, value: TrainingType) => {
+    setDays((prev) => {
+      const copy = [...prev];
+      const target = copy[dayIndex];
+      copy[dayIndex] = {
+        ...target,
+        slots: target.slots.map((s) => ({ ...s, trainingType: value })),
       };
       return copy;
     });
@@ -469,10 +565,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       setPublishError('Ajoutez au moins un créneau horaire dans la semaine avant de publier.');
       return;
     }
-    if (minParticipants > maxParticipants) {
-      setPublishError('Le minimum par défaut ne peut pas dépasser le maximum par défaut.');
-      return;
-    }
 
     // Validation Min / Max sur chaque créneau configuré
     for (const d of days) {
@@ -517,6 +609,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
             endTime: s.endTime,
             minParticipants: s.minParticipants,
             maxParticipants: s.maxParticipants,
+            trainingType: s.trainingType,
             disponibles: [],
             incertains: [],
             indisponibles: [],
@@ -531,16 +624,22 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       .filter((r) => selectedRoleIds.includes(r.id))
       .map((r) => r.name);
 
+    const slotMins = finalSlots.map((s) => s.minParticipants as number);
+    const slotMaxs = finalSlots.map((s) => s.maxParticipants as number);
+    const derivedType: TrainingType = finalSlots[0]?.trainingType || 'ASTT';
+    const derivedMin = slotMins.length > 0 ? Math.min(...slotMins) : 4;
+    const derivedMax = slotMaxs.length > 0 ? Math.max(...slotMaxs) : 8;
+
     setIsPublishing(true);
     try {
       await onPublish({
         title: title.trim(),
-        trainingType,
+        trainingType: derivedType,
         startDate: formatISODate(selectedMonday),
         endDate: formatISODate(sundayDate),
         deadline: `${deadlineDate}T${deadlineTime}:00`,
-        minParticipants,
-        maxParticipants,
+        minParticipants: derivedMin,
+        maxParticipants: derivedMax,
         targetRoles: selectedRoleNames,
         targetUsers: selectedMemberIds,
         excludedUsers: [],
@@ -590,8 +689,8 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       {/* Steps Indicator (lisible sur mobile et desktop) */}
       <div className="grid grid-cols-4 gap-1.5 sm:gap-3">
         {[
-          { num: 1, short: 'Infos', title: 'Semaine & Type', icon: Settings2 },
-          { num: 2, short: 'Créneaux', title: 'Créneaux & Profils', icon: Calendar },
+          { num: 1, short: 'Semaine', title: 'Titre & Semaine', icon: Calendar },
+          { num: 2, short: 'Créneaux', title: 'Créneaux, Types & Profils', icon: Settings2 },
           { num: 3, short: 'Membres', title: 'Membres ciblés', icon: Users },
           { num: 4, short: 'Valider', title: 'Validation', icon: Check },
         ].map((s) => {
@@ -637,128 +736,175 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       {/* Step Content */}
       <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-6">
 
-        {/* STEP 1: SEMAINE & TYPE */}
+        {/* STEP 1: TITRE & SEMAINE (CALENDRIER INTERACTIF) */}
         {step === 1 && (
           <div className="space-y-5">
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-indigo-400" />
-              Étape 1 : Choix de la semaine & Informations
-            </h3>
-
-            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
-              <label className="text-xs font-medium text-slate-300 flex items-center justify-between">
-                <span>Semaine concernée :</span>
-                <span className="text-[11px] text-slate-400">1 sondage = 1 semaine</span>
-              </label>
-
-              <div className="flex items-center justify-between gap-2 bg-slate-900 border border-slate-800 p-2 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => changeWeek(-1)}
-                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-300 transition"
-                  title="Semaine précédente"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-
-                <div className="text-center">
-                  <p className="text-sm font-bold text-white">Semaine {weekNum}</p>
-                  <p className="text-xs text-indigo-400 font-mono">
-                    du {formatFRDate(selectedMonday)} au {formatFRDate(sundayDate)}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => changeWeek(1)}
-                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-300 transition"
-                  title="Semaine suivante"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => applyWeekMonday(getMonday(new Date()))}
-                  className="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-300 py-1.5 px-2 rounded-lg text-xs border border-slate-800 transition"
-                >
-                  Cette semaine
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyWeekMonday(addDays(getMonday(new Date()), 7))}
-                  className="flex-1 bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 py-1.5 px-2 rounded-lg text-xs border border-indigo-800/60 transition"
-                >
-                  Semaine prochaine
-                </button>
-              </div>
-            </div>
-
+            {/* Titre du sondage tout en haut */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Titre du sondage</label>
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 block">
+                Titre du sondage
+              </label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => {
-                  setTitle(e.target.value);
+                  const nextTitle = e.target.value;
+                  setTitle(nextTitle);
+                  setIsCustomTitle(
+                    nextTitle.trim().length > 0 &&
+                      nextTitle !== formatDefaultPollTitle(selectedMonday)
+                  );
                   markDirty();
                 }}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition"
+                placeholder="Ex: Entraînements Semaine 47..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-base sm:text-lg font-semibold text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40 transition"
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Type de session</label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {(['MIX', 'SCRIM', 'ASTT', 'ENTRAINEMENT'] as TrainingType[]).map((t) => (
+            {/* Calendrier interactif & choix de semaine */}
+            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 sm:p-4 space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h3 className="text-sm sm:text-base font-semibold text-white flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span>Choix de la semaine</span>
+                </h3>
+                <div className="flex items-center gap-1.5 self-start sm:self-auto">
                   <button
-                    key={t}
                     type="button"
-                    onClick={() => {
-                      setTrainingType(t);
-                      markDirty();
-                    }}
-                    className={`py-3 px-3 rounded-xl border text-sm font-semibold transition ${
-                      trainingType === t
-                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/25'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
-                    }`}
+                    onClick={() => changeWeek(-1)}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white flex items-center gap-1 transition"
+                    title="Semaine précédente"
                   >
-                    {TRAINING_TYPE_LABELS[t]}
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Sem. préc.</span>
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => applyWeekMonday(addDays(getMonday(new Date()), 7))}
+                    className="px-2.5 py-1.5 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 text-xs border border-indigo-800/60 transition"
+                  >
+                    Semaine prochaine
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => changeWeek(1)}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white flex items-center gap-1 transition"
+                    title="Semaine suivante"
+                  >
+                    <span>Sem. suiv.</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Min. participants par défaut (modifiable par jour et créneau à l'étape 2)
-                </label>
-                <input
-                  type="number"
-                  min={2}
-                  max={20}
-                  value={minParticipants}
-                  onChange={(e) => updateDefaultMin(parseInt(e.target.value, 10) || 4)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
+              {/* Période sélectionnée */}
+              <div className="bg-indigo-950/35 border border-indigo-500/40 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-indigo-600 text-white shrink-0">
+                    S{weekNum}
+                  </span>
+                  <span className="text-xs sm:text-sm font-bold text-white">
+                    Du {formatFRDate(selectedMonday)} au {formatFRDate(sundayDate)}
+                  </span>
+                </div>
+                <span className="text-[11px] text-indigo-300">
+                  Cliquez sur un jour ou un numéro de semaine
+                </span>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Max. participants par défaut (modifiable par jour et créneau à l'étape 2)
-                </label>
-                <input
-                  type="number"
-                  min={2}
-                  max={20}
-                  value={maxParticipants}
-                  onChange={(e) => updateDefaultMax(parseInt(e.target.value, 10) || 8)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
+              {/* Calendrier mensuel interactif */}
+              <div className="bg-slate-900/70 border border-slate-800/90 rounded-2xl p-2.5 sm:p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => shiftCalendarMonth(-1)}
+                    className="p-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition"
+                    aria-label="Mois précédent"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm sm:text-base font-bold text-white truncate">
+                      {MONTHS_FR[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => applyWeekMonday(getMonday(new Date()))}
+                      className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500/60 text-slate-200 transition shrink-0"
+                    >
+                      Aujourd&apos;hui
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => shiftCalendarMonth(1)}
+                    className="p-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition"
+                    aria-label="Mois suivant"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-8 gap-1 text-center text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400 pt-1">
+                  <div className="py-1 text-indigo-400/90">Sem</div>
+                  {CALENDAR_WEEKDAYS.map((wd, idx) => (
+                    <div key={idx} className="py-1">
+                      <span className="sm:hidden">{wd.short}</span>
+                      <span className="hidden sm:inline">{wd.full}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-1">
+                  {calendarWeeks.map((wk) => (
+                    <div
+                      key={wk.mondayIso}
+                      className={`grid grid-cols-8 gap-1 rounded-xl p-0.5 sm:p-1 transition ${
+                        wk.isSelected
+                          ? 'bg-indigo-600/25 ring-1 ring-indigo-500/80 shadow-sm shadow-indigo-950/60'
+                          : 'hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => applyWeekMonday(wk.monday)}
+                        className={`py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-bold flex items-center justify-center transition ${
+                          wk.isSelected
+                            ? 'bg-indigo-600 text-white shadow'
+                            : 'bg-slate-950/90 text-slate-400 hover:text-white'
+                        }`}
+                        title={`Sélectionner la semaine ${wk.weekNum}`}
+                      >
+                        S{wk.weekNum}
+                      </button>
+
+                      {wk.days.map((day) => (
+                        <button
+                          key={day.iso}
+                          type="button"
+                          onClick={() => applyWeekMonday(wk.monday)}
+                          className={`py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center justify-center transition ${
+                            wk.isSelected
+                              ? day.isToday
+                                ? 'bg-emerald-500/25 text-emerald-200 font-bold ring-1 ring-emerald-400/80'
+                                : day.inMonth
+                                  ? 'text-white font-semibold hover:bg-indigo-500/30'
+                                  : 'text-indigo-200/70 hover:bg-indigo-500/20'
+                              : day.isToday
+                                ? 'bg-emerald-950/70 text-emerald-300 font-bold ring-1 ring-emerald-500/70 hover:bg-emerald-900/60'
+                                : day.inMonth
+                                  ? 'text-slate-200 hover:bg-slate-800 hover:text-white'
+                                  : 'text-slate-600 hover:bg-slate-800/50 hover:text-slate-400'
+                          }`}
+                        >
+                          {day.dayNumber}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -878,8 +1024,9 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
             <div className="space-y-3">
               {days.map((day, dayIdx) => {
                 const dayDateFormatted = formatFRDate(day.date);
-                const dayMinVal = day.slots[0]?.minParticipants ?? minParticipants;
-                const dayMaxVal = day.slots[0]?.maxParticipants ?? maxParticipants;
+                const dayMinVal = day.slots[0]?.minParticipants ?? 4;
+                const dayMaxVal = day.slots[0]?.maxParticipants ?? 8;
+                const dayTypeVal: TrainingType = day.slots[0]?.trainingType ?? 'ASTT';
 
                 return (
                   <div
@@ -912,10 +1059,27 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
 
                       {day.active && (
                         <div className="flex flex-wrap items-center gap-2">
-                          {/* Contrôles rapides Min / Max pour tout le jour */}
+                          {/* Contrôles rapides Type / Min / Max pour tout le jour */}
                           {day.slots.length > 0 && (
-                            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
+                            <div className="flex flex-wrap items-center gap-2 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
                               <span className="text-slate-400">Jour :</span>
+                              <label className="flex items-center gap-1 text-slate-300">
+                                <span>Type</span>
+                                <select
+                                  value={dayTypeVal}
+                                  onChange={(e) =>
+                                    applyDayTrainingType(dayIdx, e.target.value as TrainingType)
+                                  }
+                                  className={`bg-slate-950 border rounded px-1.5 py-0.5 text-[11px] font-semibold focus:outline-none ${TRAINING_TYPE_BADGE_CLASSES[dayTypeVal]}`}
+                                  title="Appliquer ce type de session à tous les créneaux de ce jour"
+                                >
+                                  {TRAINING_TYPES.map((t) => (
+                                    <option key={t} value={t} className="bg-slate-950 text-white">
+                                      {TRAINING_TYPE_LABELS[t]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
                               <label className="flex items-center gap-1 text-slate-300">
                                 <span>Min</span>
                                 <input
@@ -989,6 +1153,28 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] text-slate-400">Type</span>
+                                <select
+                                  value={slot.trainingType}
+                                  onChange={(e) =>
+                                    updateSlotTrainingType(
+                                      dayIdx,
+                                      slotIdx,
+                                      e.target.value as TrainingType
+                                    )
+                                  }
+                                  className={`rounded-lg px-2 py-1.5 text-xs font-semibold border focus:outline-none focus:border-indigo-500 bg-slate-950 ${TRAINING_TYPE_BADGE_CLASSES[slot.trainingType]}`}
+                                  aria-label="Type de session du créneau"
+                                >
+                                  {TRAINING_TYPES.map((t) => (
+                                    <option key={t} value={t} className="bg-slate-950 text-white">
+                                      {TRAINING_TYPE_LABELS[t]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[11px] text-slate-400">De</span>
                                 <input
@@ -1315,85 +1501,110 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         )}
 
         {/* STEP 4: RÉCAPITULATIF */}
-        {step === 4 && (
-          <div className="space-y-5">
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              Étape 4 : Récapitulatif avant publication
-            </h3>
+        {step === 4 && (() => {
+          const activeSlotsList = days.flatMap((d) => (d.active ? d.slots : []));
+          const distinctTypes = Array.from(new Set(activeSlotsList.map((s) => s.trainingType)));
+          const minBound = activeSlotsList.length > 0 ? Math.min(...activeSlotsList.map((s) => s.minParticipants)) : 4;
+          const maxBound = activeSlotsList.length > 0 ? Math.max(...activeSlotsList.map((s) => s.maxParticipants)) : 8;
 
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3 text-xs">
-              <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Titre :</span>
-                <span className="font-semibold text-white text-right">{title || '—'}</span>
-              </div>
-              <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Période :</span>
-                <span className="font-semibold text-white text-right">{weekLabel}</span>
-              </div>
-              <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Type de session :</span>
-                <span className="font-semibold text-indigo-400">
-                  {TRAINING_TYPE_LABELS[trainingType]}
-                </span>
-              </div>
-              <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Créneaux configurés :</span>
-                <span className="font-semibold text-emerald-400">{totalSlotsCount} créneau(x)</span>
-              </div>
-              <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Membres concernés :</span>
-                <span className="font-semibold text-white">
-                  {selectedMembersList.length} membre(s)
-                </span>
-              </div>
-              <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Min / Max par défaut :</span>
-                <span className="font-semibold text-white">
-                  {minParticipants} min / {maxParticipants} max
-                </span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-400">Clôture des votes :</span>
-                <span className="font-semibold text-amber-400">
-                  {deadlineDate} à {deadlineTime}
-                </span>
-              </div>
-            </div>
+          return (
+            <div className="space-y-5">
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                Étape 4 : Récapitulatif avant publication
+              </h3>
 
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-300">Détail des créneaux retenus :</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
-                {days
-                  .filter((d) => d.active && d.slots.length > 0)
-                  .map((d) => (
-                    <div key={d.dayName} className="bg-slate-950 border border-slate-800 p-2.5 rounded-xl">
-                      <span className="font-bold text-white">
-                        {d.dayName} {formatFRDate(d.date)}
-                      </span>
-                      <div className="mt-1 space-y-0.5">
-                        {d.slots.map((s, idx) => (
-                          <div key={idx} className="text-indigo-300 font-mono text-[11px]">
-                            • {s.startTime} à {s.endTime}{' '}
-                            <span className="text-slate-400">
-                              ({s.minParticipants}–{s.maxParticipants} joueurs)
-                            </span>
-                          </div>
-                        ))}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3 text-xs">
+                <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
+                  <span className="text-slate-400">Titre :</span>
+                  <span className="font-semibold text-white text-right">{title || '—'}</span>
+                </div>
+                <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
+                  <span className="text-slate-400">Période :</span>
+                  <span className="font-semibold text-white text-right">{weekLabel}</span>
+                </div>
+                <div className="flex justify-between items-center gap-2 border-b border-slate-800/80 pb-2">
+                  <span className="text-slate-400">Types de session :</span>
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    {distinctTypes.length > 0 ? (
+                      distinctTypes.map((t) => (
+                        <span
+                          key={t}
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${TRAINING_TYPE_BADGE_CLASSES[t]}`}
+                        >
+                          {TRAINING_TYPE_LABELS[t]}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-500">—</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
+                  <span className="text-slate-400">Créneaux configurés :</span>
+                  <span className="font-semibold text-emerald-400">{totalSlotsCount} créneau(x)</span>
+                </div>
+                <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
+                  <span className="text-slate-400">Membres concernés :</span>
+                  <span className="font-semibold text-white">
+                    {selectedMembersList.length} membre(s)
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
+                  <span className="text-slate-400">Joueurs par créneau :</span>
+                  <span className="font-semibold text-white">
+                    {minBound === maxBound ? `${minBound}` : `${minBound} à ${maxBound}`} joueurs (selon créneau)
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-400">Clôture des votes :</span>
+                  <span className="font-semibold text-amber-400">
+                    {deadlineDate} à {deadlineTime}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-300">Détail des créneaux retenus :</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                  {days
+                    .filter((d) => d.active && d.slots.length > 0)
+                    .map((d) => (
+                      <div key={d.dayName} className="bg-slate-950 border border-slate-800 p-2.5 rounded-xl">
+                        <span className="font-bold text-white">
+                          {d.dayName} {formatFRDate(d.date)}
+                        </span>
+                        <div className="mt-1.5 space-y-1">
+                          {d.slots.map((s, idx) => (
+                            <div key={idx} className="flex items-center justify-between gap-1.5 text-[11px]">
+                              <span className="text-indigo-300 font-mono">
+                                • {s.startTime}–{s.endTime}{' '}
+                                <span className="text-slate-400">
+                                  ({s.minParticipants}–{s.maxParticipants})
+                                </span>
+                              </span>
+                              <span
+                                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${TRAINING_TYPE_BADGE_CLASSES[s.trainingType]}`}
+                              >
+                                {TRAINING_TYPE_LABELS[s.trainingType]}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                </div>
               </div>
-            </div>
 
-            {publishError && (
-              <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                <span>{publishError}</span>
-              </div>
-            )}
-          </div>
-        )}
+              {publishError && (
+                <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{publishError}</span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Wizard Controls */}
         <div className="flex items-center justify-between pt-4 border-t border-slate-800">
