@@ -25,6 +25,8 @@ export interface TimeSlot {
   dayName: string; // Lundi, Mardi...
   startTime: string; // HH:MM
   endTime: string;   // HH:MM
+  minParticipants?: number;
+  maxParticipants?: number;
   disponibles: string[]; // user ids
   incertains: string[];
   indisponibles: string[];
@@ -77,7 +79,12 @@ export interface GuildMember {
 export interface SlotProfileDay {
   dayName: string;
   active: boolean;
-  slots: Array<{ startTime: string; endTime: string }>;
+  slots: Array<{
+    startTime: string;
+    endTime: string;
+    minParticipants?: number;
+    maxParticipants?: number;
+  }>;
 }
 
 export interface SlotProfile {

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { usePolls } from './contexts/PollsContext';
 import type { ResponseStatus } from './types';
@@ -12,7 +12,7 @@ import { OrganizerCockpitScreen } from './components/screens/OrganizerCockpitScr
 import bgFond from './assets/fond.webp';
 
 export function App() {
-  const { userProfile, loading: authLoading } = useAuth();
+  const { userProfile, loading: authLoading, logout } = useAuth();
   const {
     polls,
     guildMembers,
@@ -36,6 +36,20 @@ export function App() {
     const params = new URLSearchParams(window.location.search);
     return params.get('poll');
   });
+
+  // Garde contre les modifications non sauvegardées
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
 
   // Dériver l'écran affiché pour éviter tout setState synchrone dans useEffect
   const deepLinkMatch = Boolean(
@@ -63,20 +77,44 @@ export function App() {
     }
   };
 
+  const guardNavigation = (action: () => void) => {
+    if (hasUnsavedChanges) {
+      setPendingAction(() => action);
+      return;
+    }
+    action();
+  };
+
   const navigateTo = (screen: AppScreen) => {
-    clearDeepLinkUrl();
-    setCurrentScreen(screen);
+    if (screen === effectiveScreen) return;
+    guardNavigation(() => {
+      setHasUnsavedChanges(false);
+      clearDeepLinkUrl();
+      setCurrentScreen(screen);
+    });
   };
 
   const handleSelectPoll = (pollId: string, action: 'vote' | 'cockpit') => {
-    clearDeepLinkUrl();
-    setSelectedPollId(pollId);
-    setCurrentScreen(action);
+    guardNavigation(() => {
+      setHasUnsavedChanges(false);
+      clearDeepLinkUrl();
+      setSelectedPollId(pollId);
+      setCurrentScreen(action);
+    });
+  };
+
+  const handleLogout = () => {
+    guardNavigation(() => {
+      setHasUnsavedChanges(false);
+      void logout();
+    });
   };
 
   const handleCreatePollPublish = async (pollData: any) => {
     await createNewPoll(pollData, pollData.slots || []);
-    navigateTo('dashboard');
+    setHasUnsavedChanges(false);
+    clearDeepLinkUrl();
+    setCurrentScreen('dashboard');
   };
 
   const handleSaveVotes = async (
@@ -112,11 +150,12 @@ export function App() {
           currentScreen={effectiveScreen}
           setScreen={navigateTo}
           currentUser={userProfile}
+          onLogout={handleLogout}
         />
       )}
 
       {/* Main Content View */}
-      <main className="flex-1 flex flex-col">
+      <main className="flex-1 flex flex-col w-full">
         {authLoading ? (
           <div className="flex-1 flex items-center justify-center px-4">
             <div className="flex flex-col items-center gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl px-8 py-6 shadow-2xl">
@@ -147,6 +186,7 @@ export function App() {
             {effectiveScreen === 'create' && userProfile && (
               <CreatePollWizard
                 currentUser={userProfile}
+                onDirtyChange={setHasUnsavedChanges}
                 onCancel={() => navigateTo('dashboard')}
                 onPublish={handleCreatePollPublish}
               />
@@ -157,6 +197,7 @@ export function App() {
                 key={activePoll.id}
                 poll={activePoll}
                 currentUser={userProfile}
+                onDirtyChange={setHasUnsavedChanges}
                 onSaveVotes={handleSaveVotes}
                 onBack={() => navigateTo('dashboard')}
               />
@@ -166,11 +207,15 @@ export function App() {
               <OrganizerCockpitScreen
                 polls={polls}
                 selectedPollId={activePoll?.id || null}
-                onSelectPollId={(id) => setSelectedPollId(id)}
+                onSelectPollId={(id) => {
+                  setHasUnsavedChanges(false);
+                  setSelectedPollId(id);
+                }}
                 currentUser={userProfile}
                 guildMembers={guildMembers}
                 membersMap={membersMap}
                 voterNames={voterNames}
+                onDirtyChange={setHasUnsavedChanges}
                 onUpdateSlot={updateSingleSlot}
                 onSaveSlotPlanBatch={saveSlotPlanBatch}
                 onAddSlot={addSlot}
@@ -183,6 +228,57 @@ export function App() {
           </>
         )}
       </main>
+
+      {/* Modale d'erreur : modifications non sauvegardées */}
+      {pendingAction && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            className="bg-slate-900 border-2 border-red-500/70 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4"
+          >
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="w-10 h-10 rounded-xl bg-red-950/70 border border-red-700/60 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-white">
+                  Modifications non sauvegardées !
+                </h4>
+                <p className="text-xs text-red-300">
+                  Attention : vous risquez de perdre vos saisies.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 leading-relaxed">
+              Des modifications ont été effectuées sur cette page mais n'ont pas encore été enregistrées. Veuillez sauvegarder avant de quitter, ou confirmer l'abandon.
+            </p>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingAction(null)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition"
+              >
+                Rester et enregistrer
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const action = pendingAction;
+                  setPendingAction(null);
+                  setHasUnsavedChanges(false);
+                  action();
+                }}
+                className="px-4 py-2 text-xs font-medium text-red-300 hover:text-white bg-red-950/70 hover:bg-red-700 border border-red-800/60 rounded-xl transition"
+              >
+                Quitter sans enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

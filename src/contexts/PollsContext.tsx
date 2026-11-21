@@ -81,6 +81,8 @@ interface PollsContextType {
       cancelReason: string;
       startTime: string;
       endTime: string;
+      minParticipants: number;
+      maxParticipants: number;
     }>
   ) => Promise<void>;
   saveSlotPlanBatch: (
@@ -92,11 +94,20 @@ interface PollsContextType {
       teamAssignments?: Record<string, 'A' | 'B'>;
       cancelled?: boolean;
       cancelReason?: string;
+      minParticipants?: number;
+      maxParticipants?: number;
     }>
   ) => Promise<void>;
   addSlot: (
     pollId: string,
-    slot: { dateStr: string; dayName: string; startTime: string; endTime: string }
+    slot: {
+      dateStr: string;
+      dayName: string;
+      startTime: string;
+      endTime: string;
+      minParticipants?: number;
+      maxParticipants?: number;
+    }
   ) => Promise<string>;
   removeSlot: (pollId: string, slotId: string) => Promise<void>;
 }
@@ -254,6 +265,8 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   dayName: cs.dayName,
                   startTime: cs.startTime,
                   endTime: cs.endTime,
+                  minParticipants: cs.minParticipants ?? existing?.minParticipants,
+                  maxParticipants: cs.maxParticipants ?? existing?.maxParticipants,
                   disponibles: existing?.disponibles || [],
                   incertains: existing?.incertains || [],
                   indisponibles: existing?.indisponibles || [],
@@ -352,6 +365,8 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                         dayName: cs.dayName,
                         startTime: cs.startTime,
                         endTime: cs.endTime,
+                        minParticipants: cs.minParticipants ?? prevSlot?.minParticipants,
+                        maxParticipants: cs.maxParticipants ?? prevSlot?.maxParticipants,
                         disponibles: v?.disponibles ?? prevSlot?.disponibles ?? [],
                         incertains: v?.incertains ?? prevSlot?.incertains ?? [],
                         indisponibles: v?.indisponibles ?? prevSlot?.indisponibles ?? [],
@@ -537,6 +552,8 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       cancelReason: string;
       startTime: string;
       endTime: string;
+      minParticipants: number;
+      maxParticipants: number;
     }>
   ): Promise<void> => {
     requireAuth();
@@ -564,6 +581,8 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       teamAssignments?: Record<string, 'A' | 'B'>;
       cancelled?: boolean;
       cancelReason?: string;
+      minParticipants?: number;
+      maxParticipants?: number;
     }>
   ): Promise<void> => {
     requireAuth();
@@ -585,6 +604,8 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               teamAssignments: u.teamAssignments ?? slot.teamAssignments,
               cancelled: u.cancelled ?? slot.cancelled,
               cancelReason: u.cancelReason ?? slot.cancelReason,
+              minParticipants: u.minParticipants ?? slot.minParticipants,
+              maxParticipants: u.maxParticipants ?? slot.maxParticipants,
             };
           }),
         };
@@ -594,7 +615,14 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const addSlot = async (
     pollId: string,
-    slot: { dateStr: string; dayName: string; startTime: string; endTime: string }
+    slot: {
+      dateStr: string;
+      dayName: string;
+      startTime: string;
+      endTime: string;
+      minParticipants?: number;
+      maxParticipants?: number;
+    }
   ): Promise<string> => {
     requireAuth();
     return addSlotToPoll(pollId, slot);

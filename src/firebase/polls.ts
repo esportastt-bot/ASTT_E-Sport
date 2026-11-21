@@ -32,6 +32,8 @@ export interface PollSlotSelection {
   dayName: string;
   startTime: string;
   endTime: string;
+  minParticipants?: number;
+  maxParticipants?: number;
   selectedIds: string[];
   waitlistIds: string[];
   teamAssignments: Record<string, 'A' | 'B'>;
@@ -142,6 +144,10 @@ async function hydratePollDocuments(
           dayName: d.day_name || '',
           startTime: d.start_time || '',
           endTime: d.end_time || '',
+          minParticipants:
+            typeof d.min_participants === 'number' ? d.min_participants : undefined,
+          maxParticipants:
+            typeof d.max_participants === 'number' ? d.max_participants : undefined,
           disponibles: votes.disponibles,
           incertains: votes.incertains,
           indisponibles: votes.indisponibles,
@@ -211,6 +217,8 @@ export async function createPoll(
       day_name: slot.dayName,
       start_time: slot.startTime,
       end_time: slot.endTime,
+      min_participants: slot.minParticipants ?? pollData.minParticipants,
+      max_participants: slot.maxParticipants ?? pollData.maxParticipants,
       min_notified: false,
       sub_min_notified: false,
       selected_user_ids: [],
@@ -252,7 +260,6 @@ export function subscribeToPollsList(
     );
   }
 
-  // Non-admin : 2 requêtes autorisées par firestore.rules fusionnées en temps réel
   const targetedDocs = new Map<string, QueryDocumentSnapshot<DocumentData>>();
   const createdDocs = new Map<string, QueryDocumentSnapshot<DocumentData>>();
   let hasTargetedSnap = false;
@@ -353,6 +360,10 @@ export function subscribeToPollSlots(
           dayName: d.day_name || '',
           startTime: d.start_time || '',
           endTime: d.end_time || '',
+          minParticipants:
+            typeof d.min_participants === 'number' ? d.min_participants : undefined,
+          maxParticipants:
+            typeof d.max_participants === 'number' ? d.max_participants : undefined,
           selectedIds: Array.isArray(d.selected_user_ids) ? d.selected_user_ids : [],
           waitlistIds: Array.isArray(d.waitlist_user_ids) ? d.waitlist_user_ids : [],
           teamAssignments:
@@ -443,7 +454,7 @@ export async function updateSlotSelection(
   });
 }
 
-/** Mettre à jour les détails complets d'un créneau (équipes, annulation, horaires, sélections) */
+/** Mettre à jour les détails complets d'un créneau (équipes, annulation, min/max, horaires, sélections) */
 export async function updateSlotDetails(
   pollId: string,
   slotId: string,
@@ -455,6 +466,8 @@ export async function updateSlotDetails(
     cancelReason: string;
     startTime: string;
     endTime: string;
+    minParticipants: number;
+    maxParticipants: number;
   }>
 ): Promise<void> {
   const payload: Record<string, any> = {};
@@ -465,6 +478,8 @@ export async function updateSlotDetails(
   if (changes.cancelReason !== undefined) payload.cancel_reason = changes.cancelReason;
   if (changes.startTime !== undefined) payload.start_time = changes.startTime;
   if (changes.endTime !== undefined) payload.end_time = changes.endTime;
+  if (changes.minParticipants !== undefined) payload.min_participants = changes.minParticipants;
+  if (changes.maxParticipants !== undefined) payload.max_participants = changes.maxParticipants;
 
   await updateDoc(doc(db, POLLS_COL, pollId, 'slots', slotId), payload);
 }
@@ -479,6 +494,8 @@ export async function batchSavePollSlots(
     teamAssignments?: Record<string, 'A' | 'B'>;
     cancelled?: boolean;
     cancelReason?: string;
+    minParticipants?: number;
+    maxParticipants?: number;
   }>
 ): Promise<void> {
   if (updates.length === 0) return;
@@ -492,6 +509,8 @@ export async function batchSavePollSlots(
     if (item.teamAssignments !== undefined) payload.team_assignments = item.teamAssignments;
     if (item.cancelled !== undefined) payload.cancelled = item.cancelled;
     if (item.cancelReason !== undefined) payload.cancel_reason = item.cancelReason;
+    if (item.minParticipants !== undefined) payload.min_participants = item.minParticipants;
+    if (item.maxParticipants !== undefined) payload.max_participants = item.maxParticipants;
     batch.update(slotRef, payload);
   }
   await batch.commit();
@@ -500,13 +519,26 @@ export async function batchSavePollSlots(
 /** Ajouter un créneau de secours à un sondage existant */
 export async function addSlotToPoll(
   pollId: string,
-  slot: { dateStr: string; dayName: string; startTime: string; endTime: string }
+  slot: {
+    dateStr: string;
+    dayName: string;
+    startTime: string;
+    endTime: string;
+    minParticipants?: number;
+    maxParticipants?: number;
+  }
 ): Promise<string> {
   const created = await addDoc(collection(db, POLLS_COL, pollId, 'slots'), {
     date_str: slot.dateStr,
     day_name: slot.dayName,
     start_time: slot.startTime,
     end_time: slot.endTime,
+    ...(typeof slot.minParticipants === 'number'
+      ? { min_participants: slot.minParticipants }
+      : {}),
+    ...(typeof slot.maxParticipants === 'number'
+      ? { max_participants: slot.maxParticipants }
+      : {}),
     min_notified: false,
     sub_min_notified: false,
     selected_user_ids: [],

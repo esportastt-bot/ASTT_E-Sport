@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   TRAINING_TYPE_LABELS,
   type GuildMember,
@@ -11,7 +11,7 @@ import {
   ChevronDown, ChevronUp, UserMinus, UserCheck, Shield, ArrowLeft,
   Sparkles, Loader2, X, Users, Calendar, Ban, Trash2,
   Plus, Settings, Copy, Check, Lock, Eye, Pencil, RotateCcw,
-  Split, HelpCircle
+  Split, HelpCircle, ChevronsDownUp, ChevronsUpDown
 } from 'lucide-react';
 import { UserAvatar } from '../UserAvatar';
 import { formatFRDateTime, formatShortFRDate } from '../../utils/dateUtils';
@@ -30,6 +30,7 @@ interface OrganizerCockpitScreenProps {
   guildMembers: GuildMember[];
   membersMap: Record<string, MemberProfile>;
   voterNames: Record<string, string>;
+  onDirtyChange?: (dirty: boolean) => void;
   onUpdateSlot: (
     pollId: string,
     slotId: string,
@@ -39,6 +40,8 @@ interface OrganizerCockpitScreenProps {
       teamAssignments: Record<string, 'A' | 'B'>;
       cancelled: boolean;
       cancelReason: string;
+      minParticipants: number;
+      maxParticipants: number;
     }>
   ) => Promise<void>;
   onSaveSlotPlanBatch: (
@@ -48,11 +51,20 @@ interface OrganizerCockpitScreenProps {
       selectedIds: string[];
       waitlistIds: string[];
       teamAssignments?: Record<string, 'A' | 'B'>;
+      minParticipants?: number;
+      maxParticipants?: number;
     }>
   ) => Promise<void>;
   onAddSlot: (
     pollId: string,
-    slot: { dateStr: string; dayName: string; startTime: string; endTime: string }
+    slot: {
+      dateStr: string;
+      dayName: string;
+      startTime: string;
+      endTime: string;
+      minParticipants?: number;
+      maxParticipants?: number;
+    }
   ) => Promise<string>;
   onRemoveSlot: (pollId: string, slotId: string) => Promise<void>;
   onUpdatePoll: (
@@ -73,6 +85,8 @@ interface SlotDraft {
   selectedIds: string[];
   waitlistIds: string[];
   teamAssignments: Record<string, 'A' | 'B'>;
+  minParticipants: number;
+  maxParticipants: number;
 }
 
 const FR_WEEKDAYS = [
@@ -110,6 +124,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   guildMembers,
   membersMap,
   voterNames,
+  onDirtyChange,
   onUpdateSlot,
   onSaveSlotPlanBatch,
   onAddSlot,
@@ -126,22 +141,27 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     'all' | 'responded' | 'missing' | 'unfulfilled'
   >('all');
 
-  // Brouillons par sondage/créneau pour édition avant sauvegarde
+  // Tous les jours/créneaux repliés par défaut (Set vide)
+  const [expandedSlotIds, setExpandedSlotIds] = useState<Set<string>>(() => new Set());
+
+  // Brouillons par créneau
   const [draftsBySlot, setDraftsBySlot] = useState<Record<string, SlotDraft>>({});
-  const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
   const [optimizationBanner, setOptimizationBanner] =
     useState<ScheduleOptimizationResult['summary'] | null>(null);
+  const [pendingPollSwitchId, setPendingPollSwitchId] = useState<string | null>(null);
 
   const [savingAll, setSavingAll] = useState(false);
   const [savingSlotId, setSavingSlotId] = useState<string | null>(null);
   const [savedFeedback, setSavedFeedback] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Outils rapides (ajout créneau, paramètres, annulation salle, suppression)
+  // Outils rapides
   const [showAddSlotForm, setShowAddSlotForm] = useState(false);
   const [newSlotDate, setNewSlotDate] = useState('');
   const [newSlotStart, setNewSlotStart] = useState('20:30');
   const [newSlotEnd, setNewSlotEnd] = useState('21:50');
+  const [newSlotMin, setNewSlotMin] = useState(4);
+  const [newSlotMax, setNewSlotMax] = useState(8);
   const [addingSlot, setAddingSlot] = useState(false);
 
   const [showQuickSettings, setShowQuickSettings] = useState(false);
@@ -157,7 +177,17 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
   const [copiedType, setCopiedType] = useState<'discord' | 'reminders' | null>(null);
 
-  // Résolution des infos utilisateur (Annuaire Discord → Firestore members → voterNames → fallback)
+  const dirtySlotIds = useMemo(() => {
+    if (!poll) return [];
+    return Object.keys(draftsBySlot).filter((sid) =>
+      poll.slots.some((s) => s.id === sid)
+    );
+  }, [draftsBySlot, poll]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirtySlotIds.length > 0);
+  }, [dirtySlotIds.length, onDirtyChange]);
+
   const getUserInfo = (userId: string) => {
     const guildM = guildMembers.find((m) => m.discordId === userId);
     if (guildM) {
@@ -196,7 +226,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
   if (!poll) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-12 text-center space-y-4">
+      <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-12 text-center space-y-4">
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 space-y-4">
           <h2 className="text-xl font-bold text-white">Espace Pilotage</h2>
           <p className="text-sm text-slate-400">
@@ -209,7 +239,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                 onClick={onBack}
                 className="px-4 py-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl"
               >
-                Retour au tableau de bord
+                Retour à l'accueil
               </button>
             )}
             <button
@@ -226,16 +256,16 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   }
 
   const canEdit = currentUser.isAdmin || poll.createdBy === currentUser.id;
-  const effectiveExpandedId =
-    expandedSlotId && poll.slots.some((s) => s.id === expandedSlotId)
-      ? expandedSlotId
-      : poll.slots[0]?.id || null;
 
   // Fusion temps réel Firestore + brouillons locaux
   const resolvedSlots = poll.slots.map((slot) => {
     const draft = draftsBySlot[slot.id];
+    const slotMin = draft?.minParticipants ?? slot.minParticipants ?? poll.minParticipants;
+    const slotMax = draft?.maxParticipants ?? slot.maxParticipants ?? poll.maxParticipants;
     return {
       ...slot,
+      minParticipants: slotMin,
+      maxParticipants: slotMax,
       selectedIds: draft ? draft.selectedIds : slot.selectedIds,
       waitlistIds: draft ? draft.waitlistIds : slot.waitlistIds,
       teamAssignments: draft ? draft.teamAssignments : slot.teamAssignments || {},
@@ -255,7 +285,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     return b.incertains.length - a.incertains.length;
   });
 
-  // Calcul des parties attribuées dans ce sondage (y compris brouillons)
   const assignedInThisPoll: Record<string, number> = {};
   for (const s of resolvedSlots) {
     if (s.cancelled) continue;
@@ -264,7 +293,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }
   }
 
-  // Tous les membres concernés ou ayant répondu
   const allRelevantUserIds = Array.from(
     new Set<string>([
       ...(poll.targetUsers || []),
@@ -297,10 +325,10 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   const activeSlots = resolvedSlots.filter((s) => !s.cancelled);
   const cancelledSlotsCount = resolvedSlots.length - activeSlots.length;
   const viableSlotsCount = activeSlots.filter(
-    (s) => s.disponibles.length >= poll.minParticipants
+    (s) => s.disponibles.length >= s.minParticipants
   ).length;
   const plannedSessionsCount = activeSlots.filter(
-    (s) => s.selectedIds.length >= poll.minParticipants
+    (s) => s.selectedIds.length >= s.minParticipants
   ).length;
 
   let requestingCount = 0;
@@ -313,15 +341,49 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }
   }
 
-  const dirtySlotIds = Object.keys(draftsBySlot).filter((sid) =>
-    poll.slots.some((s) => s.id === sid)
-  );
-
   const showToast = (msg: string) => {
     setSavedFeedback(msg);
     setTimeout(() => {
       setSavedFeedback((prev) => (prev === msg ? null : prev));
     }, 3500);
+  };
+
+  const toggleSlotExpanded = (slotId: string) => {
+    setExpandedSlotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(slotId)) next.delete(slotId);
+      else next.add(slotId);
+      return next;
+    });
+  };
+
+  const areAllExpanded =
+    orderedSlots.length > 0 && orderedSlots.every((s) => expandedSlotIds.has(s.id));
+
+  const toggleExpandAll = () => {
+    if (areAllExpanded) {
+      setExpandedSlotIds(new Set());
+    } else {
+      setExpandedSlotIds(new Set(orderedSlots.map((s) => s.id)));
+    }
+  };
+
+  const switchPollNow = (targetId: string) => {
+    setDraftsBySlot({});
+    setOptimizationBanner(null);
+    setExpandedSlotIds(new Set());
+    setPendingPollSwitchId(null);
+    onDirtyChange?.(false);
+    onSelectPollId(targetId);
+  };
+
+  const handlePollSelectChange = (targetId: string) => {
+    if (targetId === poll.id) return;
+    if (dirtySlotIds.length > 0) {
+      setPendingPollSwitchId(targetId);
+      return;
+    }
+    switchPollNow(targetId);
   };
 
   // Helpers d'édition de brouillon
@@ -332,6 +394,8 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       selectedIds: base?.selectedIds || [],
       waitlistIds: base?.waitlistIds || [],
       teamAssignments: base?.teamAssignments || {},
+      minParticipants: base?.minParticipants ?? poll.minParticipants,
+      maxParticipants: base?.maxParticipants ?? poll.maxParticipants,
     };
     setDraftsBySlot((prev) => ({
       ...prev,
@@ -342,11 +406,11 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
   const moveToSelected = (slotId: string, userId: string) => {
     updateSlotDraft(slotId, (cur) => ({
+      ...cur,
       selectedIds: cur.selectedIds.includes(userId)
         ? cur.selectedIds
         : [...cur.selectedIds, userId],
       waitlistIds: cur.waitlistIds.filter((id) => id !== userId),
-      teamAssignments: cur.teamAssignments,
     }));
   };
 
@@ -355,6 +419,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       const nextTeams = { ...cur.teamAssignments };
       delete nextTeams[userId];
       return {
+        ...cur,
         selectedIds: cur.selectedIds.filter((id) => id !== userId),
         waitlistIds: cur.waitlistIds.includes(userId)
           ? cur.waitlistIds
@@ -369,6 +434,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       const nextTeams = { ...cur.teamAssignments };
       delete nextTeams[userId];
       return {
+        ...cur,
         selectedIds: cur.selectedIds.filter((id) => id !== userId),
         waitlistIds: cur.waitlistIds.filter((id) => id !== userId),
         teamAssignments: nextTeams,
@@ -394,16 +460,30 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }));
   };
 
+  const updateSlotMinMaxDraft = (
+    slotId: string,
+    field: 'minParticipants' | 'maxParticipants',
+    value: number
+  ) => {
+    updateSlotDraft(slotId, (cur) => ({
+      ...cur,
+      [field]: value,
+    }));
+  };
+
   const handleRunOptimizer = () => {
     if (!canEdit) return;
     const result = generateOptimalSchedule(poll, monthlyOtherGames);
     const nextDrafts: Record<string, SlotDraft> = {};
 
     Object.values(result.slotProposals).forEach((prop) => {
+      const base = poll.slots.find((s) => s.id === prop.slotId);
       nextDrafts[prop.slotId] = {
         selectedIds: prop.selectedIds,
         waitlistIds: prop.waitlistIds,
         teamAssignments: prop.teamAssignments,
+        minParticipants: base?.minParticipants ?? poll.minParticipants,
+        maxParticipants: base?.maxParticipants ?? poll.maxParticipants,
       };
     });
 
@@ -416,11 +496,16 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   const handleDiscardAllDrafts = () => {
     setDraftsBySlot({});
     setOptimizationBanner(null);
+    onDirtyChange?.(false);
   };
 
   const handleSaveSingleSlot = async (slotId: string) => {
     const draft = draftsBySlot[slotId];
     if (!canEdit || !draft || savingSlotId) return;
+    if (draft.minParticipants > draft.maxParticipants) {
+      setActionError('Le minimum ne peut pas dépasser le maximum sur ce créneau.');
+      return;
+    }
     setSavingSlotId(slotId);
     setActionError(null);
     try {
@@ -428,6 +513,8 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         selectedIds: draft.selectedIds,
         waitlistIds: draft.waitlistIds,
         teamAssignments: draft.teamAssignments,
+        minParticipants: draft.minParticipants,
+        maxParticipants: draft.maxParticipants,
       });
       setDraftsBySlot((prev) => {
         const copy = { ...prev };
@@ -444,6 +531,13 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
   const handleSaveAllDrafts = async () => {
     if (!canEdit || dirtySlotIds.length === 0 || savingAll) return;
+    for (const sid of dirtySlotIds) {
+      const d = draftsBySlot[sid];
+      if (d.minParticipants > d.maxParticipants) {
+        setActionError('Un créneau modifié a un minimum supérieur à son maximum.');
+        return;
+      }
+    }
     setSavingAll(true);
     setActionError(null);
     try {
@@ -452,10 +546,13 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         selectedIds: draftsBySlot[sid].selectedIds,
         waitlistIds: draftsBySlot[sid].waitlistIds,
         teamAssignments: draftsBySlot[sid].teamAssignments,
+        minParticipants: draftsBySlot[sid].minParticipants,
+        maxParticipants: draftsBySlot[sid].maxParticipants,
       }));
       await onSaveSlotPlanBatch(poll.id, updates);
       setDraftsBySlot({});
       setOptimizationBanner(null);
+      onDirtyChange?.(false);
       showToast(`Planning enregistré (${updates.length} créneau(x) mis à jour) !`);
     } catch (err: any) {
       setActionError(err?.message || "Impossible d'enregistrer le planning.");
@@ -504,6 +601,10 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   const handleCreateExtraSlot = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit || !newSlotDate || !newSlotStart || !newSlotEnd || addingSlot) return;
+    if (newSlotMin > newSlotMax) {
+      setActionError('Le minimum ne peut pas dépasser le maximum pour le nouveau créneau.');
+      return;
+    }
     setAddingSlot(true);
     setActionError(null);
     try {
@@ -512,6 +613,8 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         dayName: getFrenchDayName(newSlotDate),
         startTime: newSlotStart,
         endTime: newSlotEnd,
+        minParticipants: newSlotMin,
+        maxParticipants: newSlotMax,
       });
       setShowAddSlotForm(false);
       showToast('Nouveau créneau ajouté au sondage.');
@@ -566,7 +669,11 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     ];
 
     const slotsToExport = resolvedSlots
-      .filter((s) => !s.cancelled && (s.selectedIds.length > 0 || s.disponibles.length >= poll.minParticipants))
+      .filter(
+        (s) =>
+          !s.cancelled &&
+          (s.selectedIds.length > 0 || s.disponibles.length >= s.minParticipants)
+      )
       .sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.startTime.localeCompare(b.startTime));
 
     const targetList = slotsToExport.length > 0 ? slotsToExport : activeSlots;
@@ -623,7 +730,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }
   };
 
-  // Liste filtrée des membres pour l'onglet Suivi
   const memberRows = allRelevantUserIds
     .map((uid) => {
       const info = getUserInfo(uid);
@@ -692,7 +798,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+    <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6">
 
       {/* Top Navigation & Sélecteur de sondage */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -702,20 +808,15 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
             className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition group self-start"
           >
             <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition" />
-            <span>Retour aux sondages</span>
+            <span>Retour à l'accueil</span>
           </button>
         )}
 
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={poll.id}
-            onChange={(e) => {
-              setDraftsBySlot({});
-              setOptimizationBanner(null);
-              setExpandedSlotId(null);
-              onSelectPollId(e.target.value);
-            }}
-            className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-white focus:outline-none focus:border-indigo-500 max-w-full sm:max-w-xs"
+            onChange={(e) => handlePollSelectChange(e.target.value)}
+            className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-white focus:outline-none focus:border-indigo-500 max-w-full sm:max-w-md"
           >
             {polls.map((p) => (
               <option key={p.id} value={p.id}>
@@ -760,7 +861,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
               Clôture : {formatFRDateTime(poll.deadline)}
             </p>
             <p>
-              Min : <strong className="text-white">{poll.minParticipants}</strong> | Max :{' '}
+              Défaut : Min <strong className="text-white">{poll.minParticipants}</strong> | Max{' '}
               <strong className="text-white">{poll.maxParticipants}</strong> joueurs
             </p>
           </div>
@@ -839,6 +940,8 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                   setShowAddSlotForm((v) => !v);
                   setShowQuickSettings(false);
                   if (!newSlotDate) setNewSlotDate(poll.startDate || '');
+                  setNewSlotMin(poll.minParticipants);
+                  setNewSlotMax(poll.maxParticipants);
                 }}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
               >
@@ -860,6 +963,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
           <button
             type="button"
             onClick={handleCopyDiscordSummary}
+            title="Copie un résumé prêt à coller (Ctrl+V) dans un salon Discord avec les créneaux, titulaires et équipes"
             className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
           >
             {copiedType === 'discord' ? (
@@ -926,6 +1030,28 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                 className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
               />
             </div>
+            <div className="space-y-1">
+              <label className="text-slate-400 block">Min</label>
+              <input
+                type="number"
+                min={2}
+                max={20}
+                value={newSlotMin}
+                onChange={(e) => setNewSlotMin(parseInt(e.target.value, 10) || 2)}
+                className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-slate-400 block">Max</label>
+              <input
+                type="number"
+                min={2}
+                max={20}
+                value={newSlotMax}
+                onChange={(e) => setNewSlotMax(parseInt(e.target.value, 10) || 8)}
+                className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
+              />
+            </div>
             <button
               type="submit"
               disabled={addingSlot}
@@ -945,22 +1071,22 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
           >
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="space-y-1">
-                <label className="text-slate-400 block">Min. joueurs</label>
+                <label className="text-slate-400 block">Min. par défaut</label>
                 <input
                   type="number"
                   min={2}
-                  max={16}
+                  max={20}
                   value={settingsMin}
                   onChange={(e) => setSettingsMin(parseInt(e.target.value, 10) || 4)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-slate-400 block">Max. joueurs</label>
+                <label className="text-slate-400 block">Max. par défaut</label>
                 <input
                   type="number"
                   min={2}
-                  max={16}
+                  max={20}
                   value={settingsMax}
                   onChange={(e) => setSettingsMax(parseInt(e.target.value, 10) || 8)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
@@ -1021,7 +1147,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         )}
       </div>
 
-      {/* Feedbacks & Bandeau d'optimisation / modifications en attente */}
+      {/* Feedbacks & Alerte Modifications non sauvegardées */}
       {actionError && (
         <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center justify-between gap-2">
           <span className="flex items-center gap-2">
@@ -1042,16 +1168,19 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       )}
 
       {canEdit && (dirtySlotIds.length > 0 || optimizationBanner) && (
-        <div className="bg-indigo-950/70 border border-indigo-500/50 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+        <div
+          role="alert"
+          className="bg-red-950/75 border-2 border-red-500/70 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg"
+        >
           <div className="space-y-1 text-xs">
-            <p className="font-semibold text-white flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-indigo-300" />
+            <p className="font-bold text-white flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
               {optimizationBanner
-                ? `Proposition générée : ${optimizationBanner.plannedSessionsCount} séance(s) planifiée(s), ${optimizationBanner.satisfiedPlayersCount}/${optimizationBanner.totalRequestingPlayers} souhait(s) couvert(s).`
-                : `${dirtySlotIds.length} créneau(x) modifié(s) en brouillon.`}
+                ? `Modifications non sauvegardées (proposition optimale) : ${optimizationBanner.plannedSessionsCount} séance(s) planifiée(s), ${optimizationBanner.satisfiedPlayersCount}/${optimizationBanner.totalRequestingPlayers} souhait(s) couvert(s).`
+                : `Modifications non sauvegardées sur ${dirtySlotIds.length} créneau(x) ! Cliquez sur « Enregistrer tout le planning » pour ne rien perdre.`}
             </p>
             {optimizationBanner && optimizationBanner.unfulfilledPlayers.length > 0 && (
-              <p className="text-amber-300 text-[11px]">
+              <p className="text-amber-200 text-[11px]">
                 Objectif partiel pour :{' '}
                 {optimizationBanner.unfulfilledPlayers
                   .map((u) => `${getUserInfo(u.userId).name} (${u.assigned}/${u.desired})`)
@@ -1065,7 +1194,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
               type="button"
               onClick={handleDiscardAllDrafts}
               disabled={savingAll}
-              className="px-3 py-2 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition"
+              className="px-3 py-2 text-xs text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition"
             >
               Annuler
             </button>
@@ -1084,7 +1213,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         </div>
       )}
 
-      {/* Onglets Cockpit */}
+      {/* Onglets Cockpit & Contrôles d'affichage */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-xl">
           <button
@@ -1112,25 +1241,47 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         </div>
 
         {activeTab === 'planning' && (
-          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl text-xs">
-            <button
-              type="button"
-              onClick={() => setSortMode('rank')}
-              className={`px-2.5 py-1 rounded-lg transition ${
-                sortMode === 'rank' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400'
-              }`}
-            >
-              Par classement
-            </button>
-            <button
-              type="button"
-              onClick={() => setSortMode('date')}
-              className={`px-2.5 py-1 rounded-lg transition ${
-                sortMode === 'date' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400'
-              }`}
-            >
-              Par date
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {orderedSlots.length > 0 && (
+              <button
+                type="button"
+                onClick={toggleExpandAll}
+                className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition"
+              >
+                {areAllExpanded ? (
+                  <>
+                    <ChevronsDownUp className="w-3.5 h-3.5" />
+                    <span>Tout replier</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronsUpDown className="w-3.5 h-3.5" />
+                    <span>Tout déplier</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl text-xs">
+              <button
+                type="button"
+                onClick={() => setSortMode('rank')}
+                className={`px-2.5 py-1 rounded-lg transition ${
+                  sortMode === 'rank' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400'
+                }`}
+              >
+                Par classement
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortMode('date')}
+                className={`px-2.5 py-1 rounded-lg transition ${
+                  sortMode === 'date' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400'
+                }`}
+              >
+                Par date
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -1139,14 +1290,16 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       {activeTab === 'planning' && (
         <div className="space-y-4">
           {orderedSlots.map((slot, index) => {
-            const isExpanded = effectiveExpandedId === slot.id;
+            const isExpanded = expandedSlotIds.has(slot.id);
             const isCancelled = Boolean(slot.cancelled);
+            const slotMin = slot.minParticipants;
+            const slotMax = slot.maxParticipants;
             const nbDispo = slot.disponibles.length;
             const nbIncertain = slot.incertains.length;
             const nbIndispo = slot.indisponibles.length;
-            const isExceeded = nbDispo > poll.maxParticipants;
-            const isMinReached = nbDispo >= poll.minParticipants;
-            const placesRestantes = Math.max(0, poll.maxParticipants - nbDispo);
+            const isExceeded = nbDispo > slotMax;
+            const isMinReached = nbDispo >= slotMin;
+            const placesRestantes = Math.max(0, slotMax - nbDispo);
 
             const unassignedDisponibles = slot.disponibles.filter(
               (id) => !slot.selectedIds.includes(id) && !slot.waitlistIds.includes(id)
@@ -1165,7 +1318,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                   isCancelled
                     ? 'border-red-900/50 opacity-75'
                     : isDirty
-                    ? 'border-indigo-500/60'
+                    ? 'border-red-500/70'
                     : isExceeded
                     ? 'border-amber-500/40'
                     : isMinReached
@@ -1175,9 +1328,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
               >
                 {/* Summary Bar */}
                 <div
-                  onClick={() =>
-                    setExpandedSlotId((prev) => (prev === slot.id ? null : slot.id))
-                  }
+                  onClick={() => toggleSlotExpanded(slot.id)}
                   className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:bg-slate-800/40 transition select-none"
                 >
                   <div className="flex items-center gap-3">
@@ -1205,9 +1356,17 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                         <span className="text-xs text-indigo-300 font-mono font-medium">
                           ({slot.startTime} - {slot.endTime})
                         </span>
+                        <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full">
+                          Min {slotMin} · Max {slotMax}
+                        </span>
                         {slot.selectedIds.length > 0 && !isCancelled && (
                           <span className="text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
                             {slot.selectedIds.length} titulaire(s)
+                          </span>
+                        )}
+                        {isDirty && (
+                          <span className="text-[10px] bg-red-950 text-red-300 border border-red-700/60 px-2 py-0.5 rounded-full">
+                            Non sauvegardé
                           </span>
                         )}
                       </h3>
@@ -1229,7 +1388,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                     ) : isExceeded ? (
                       <span className="bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs px-2.5 py-1 rounded-xl font-medium flex items-center gap-1.5">
                         <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                        Dépassement (+{nbDispo - poll.maxParticipants})
+                        Dépassement (+{nbDispo - slotMax})
                       </span>
                     ) : isMinReached ? (
                       <span className="bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs px-2.5 py-1 rounded-xl font-medium flex items-center gap-1.5">
@@ -1238,7 +1397,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                       </span>
                     ) : (
                       <span className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-2.5 py-1 rounded-xl font-medium">
-                        Manque {poll.minParticipants - nbDispo} joueur(s)
+                        Manque {slotMin - nbDispo} joueur(s)
                       </span>
                     )}
 
@@ -1256,6 +1415,43 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                     {canEdit && (
                       <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
                         <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
+                            <label className="flex items-center gap-1 text-slate-300">
+                              <span className="text-slate-400">Min</span>
+                              <input
+                                type="number"
+                                min={2}
+                                max={20}
+                                value={slotMin}
+                                onChange={(e) =>
+                                  updateSlotMinMaxDraft(
+                                    slot.id,
+                                    'minParticipants',
+                                    parseInt(e.target.value, 10) || 2
+                                  )
+                                }
+                                className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
+                              />
+                            </label>
+                            <label className="flex items-center gap-1 text-slate-300">
+                              <span className="text-slate-400">Max</span>
+                              <input
+                                type="number"
+                                min={2}
+                                max={20}
+                                value={slotMax}
+                                onChange={(e) =>
+                                  updateSlotMinMaxDraft(
+                                    slot.id,
+                                    'maxParticipants',
+                                    parseInt(e.target.value, 10) || 8
+                                  )
+                                }
+                                className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
+                              />
+                            </label>
+                          </div>
+
                           {slot.selectedIds.length >= 2 && !isCancelled && (
                             <button
                               type="button"
@@ -1350,7 +1546,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                           Disponibles à répartir ({unassignedDisponibles.length})
                         </span>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                           {unassignedDisponibles.map((userId) => {
                             const info = getUserInfo(userId);
                             return (
@@ -1424,7 +1620,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
                             <CheckCircle className="w-3.5 h-3.5" />
-                            Titulaires ({slot.selectedIds.length}/{poll.maxParticipants})
+                            Titulaires ({slot.selectedIds.length}/{slotMax})
                           </span>
                           {canEdit && (
                             <span className="text-[10px] text-slate-400">
@@ -1625,14 +1821,14 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                       </div>
                     </div>
 
-                    {/* Bouton Enregistrer ce créneau (si modifié) */}
+                    {/* Bouton Enregistrer ce créneau */}
                     {canEdit && isDirty && (
                       <div className="pt-2 flex justify-end">
                         <button
                           type="button"
                           disabled={isSavingThis}
                           onClick={() => handleSaveSingleSlot(slot.id)}
-                          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold text-xs py-2 px-4 rounded-xl transition flex items-center gap-1.5 shadow"
+                          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-semibold text-xs py-2 px-4 rounded-xl transition flex items-center gap-1.5 shadow"
                         >
                           {isSavingThis ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1755,6 +1951,52 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Modale confirmation changement de sondage si brouillons non sauvegardés */}
+      {pendingPollSwitchId && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            className="bg-slate-900 border-2 border-red-500/70 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4"
+          >
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="w-10 h-10 rounded-xl bg-red-950/70 border border-red-700/60 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-white">
+                  Modifications non sauvegardées !
+                </h4>
+                <p className="text-xs text-red-300">
+                  Vous avez des changements en attente sur ce sondage.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+              Enregistrez le planning avant de changer de sondage, ou confirmez l'abandon de vos modifications locales.
+            </p>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingPollSwitchId(null)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition"
+              >
+                Rester et enregistrer
+              </button>
+              <button
+                type="button"
+                onClick={() => switchPollNow(pendingPollSwitchId)}
+                className="px-4 py-2 text-xs font-medium text-red-300 hover:text-white bg-red-950/70 hover:bg-red-700 border border-red-800/60 rounded-xl transition"
+              >
+                Changer sans enregistrer
+              </button>
+            </div>
           </div>
         </div>
       )}

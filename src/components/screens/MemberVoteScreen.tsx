@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   TRAINING_TYPE_LABELS,
   type Poll,
@@ -8,13 +8,14 @@ import {
 import {
   CheckCircle2, HelpCircle, XCircle, Clock, Calendar,
   Info, AlertCircle, Save, ArrowLeft, Loader2, Lock, AlertTriangle,
-  Gamepad2, Ban, Minus, Plus
+  Gamepad2, Ban, Minus, Plus, Users
 } from 'lucide-react';
 import { formatFRDateTime, formatShortFRDate } from '../../utils/dateUtils';
 
 interface MemberVoteScreenProps {
   poll: Poll;
   currentUser: UserProfile;
+  onDirtyChange?: (dirty: boolean) => void;
   onSaveVotes: (
     votes: Record<string, ResponseStatus>,
     desiredGames: number | null
@@ -25,12 +26,12 @@ interface MemberVoteScreenProps {
 export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
   poll,
   currentUser,
+  onDirtyChange,
   onSaveVotes,
   onBack,
 }) => {
   const isClosed = poll.status !== 'OPEN';
 
-  // Votes déjà enregistrés dans Firestore pour cet utilisateur
   const savedVotes = useMemo(() => {
     const map: Record<string, ResponseStatus> = {};
     poll.slots.forEach((s) => {
@@ -41,7 +42,6 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
     return map;
   }, [poll.slots, currentUser.id]);
 
-  // Souhait de parties déjà enregistré (ou 1 par défaut si jamais voté)
   const hasSavedDesired = Object.prototype.hasOwnProperty.call(
     poll.desiredGamesByUser || {},
     currentUser.id
@@ -50,7 +50,6 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
     ? poll.desiredGamesByUser[currentUser.id]
     : 1;
 
-  // Modifications locales en attente d'enregistrement
   const [draftVotes, setDraftVotes] = useState<Record<string, ResponseStatus>>({});
   const [draftDesiredGames, setDraftDesiredGames] = useState<number | null | undefined>(
     undefined
@@ -58,6 +57,13 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const hasUnsavedChanges =
+    Object.keys(draftVotes).length > 0 || draftDesiredGames !== undefined;
+
+  useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
 
   const effectiveVotes: Record<string, ResponseStatus> = {
     ...savedVotes,
@@ -93,6 +99,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
       await onSaveVotes(effectiveVotes, effectiveDesiredGames);
       setDraftVotes({});
       setDraftDesiredGames(undefined);
+      onDirtyChange?.(false);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err: any) {
@@ -106,7 +113,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+    <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 py-6 space-y-6">
 
       {/* Back to dashboard button */}
       {onBack && (
@@ -115,7 +122,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition group mb-1"
         >
           <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition" />
-          <span>Retour aux sondages</span>
+          <span>Retour à l'accueil</span>
         </button>
       )}
 
@@ -228,7 +235,6 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
             Illimité
           </button>
 
-          {/* Ajustement fin - / + */}
           <div className="ml-auto flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1">
             <button
               type="button"
@@ -264,10 +270,12 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
       </div>
 
       {/* Slots List */}
-      <div className="space-y-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {poll.slots.map((slot) => {
           const isSlotCancelled = Boolean(slot.cancelled);
           const currentVote = effectiveVotes[slot.id];
+          const slotMin = slot.minParticipants ?? poll.minParticipants;
+          const slotMax = slot.maxParticipants ?? poll.maxParticipants;
 
           return (
             <div
@@ -304,20 +312,25 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                   </div>
                 </div>
 
-                {isSlotCancelled && (
+                {isSlotCancelled ? (
                   <span className="text-[11px] bg-red-950/70 border border-red-800/60 text-red-300 px-2.5 py-1 rounded-lg self-start sm:self-auto">
                     Annulé — {slot.cancelReason || 'Créneau indisponible'}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-slate-400 bg-slate-950/70 border border-slate-800 px-2.5 py-1 rounded-lg flex items-center gap-1 self-start sm:self-auto">
+                    <Users className="w-3 h-3 text-slate-400" />
+                    {slotMin}–{slotMax} joueurs
                   </span>
                 )}
               </div>
 
               {/* 3 Action Buttons */}
-              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'DISPONIBLE')}
-                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'DISPONIBLE'
                       ? 'bg-emerald-600 border-emerald-400 text-white shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-300'
@@ -331,7 +344,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                   type="button"
                   disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'INCERTAIN')}
-                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'INCERTAIN'
                       ? 'bg-amber-600 border-amber-400 text-white shadow-lg shadow-amber-600/30 ring-2 ring-amber-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-amber-500/40 hover:text-amber-300'
@@ -345,7 +358,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                   type="button"
                   disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'INDISPONIBLE')}
-                  className={`py-3 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'INDISPONIBLE'
                       ? 'bg-red-600 border-red-400 text-white shadow-lg shadow-red-600/30 ring-2 ring-red-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-red-500/40 hover:text-red-300'
@@ -361,12 +374,23 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
       </div>
 
       {/* Save Button Floating or Bottom */}
-      <div className="sticky bottom-4 md:bottom-6 bg-slate-950/90 backdrop-blur-md p-4 rounded-2xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xl">
+      <div
+        className={`sticky bottom-4 md:bottom-6 backdrop-blur-md p-4 rounded-2xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xl transition ${
+          saveError || hasUnsavedChanges
+            ? 'bg-red-950/90 border-red-500/70'
+            : 'bg-slate-950/90 border-slate-800'
+        }`}
+      >
         <div className="flex items-center gap-2">
           {saveError ? (
-            <span className="text-xs text-red-400 font-medium flex items-center gap-1.5">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span className="text-xs text-red-200 font-medium flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
               {saveError}
+            </span>
+          ) : hasUnsavedChanges ? (
+            <span className="text-xs text-red-200 font-semibold flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              Modifications non sauvegardées ! Cliquez sur « Enregistrer » pour valider vos réponses.
             </span>
           ) : savedSuccess ? (
             <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
@@ -376,7 +400,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
           ) : (
             <span className="text-xs text-slate-400 flex items-center gap-1.5">
               <AlertCircle className="w-4 h-4 text-indigo-400 shrink-0" />
-              {isClosed ? 'Votes verrouillés' : "N'oubliez pas d'enregistrer vos choix"}
+              {isClosed ? 'Votes verrouillés' : 'Vos réponses sont à jour'}
             </span>
           )}
         </div>
@@ -385,7 +409,11 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
           type="button"
           onClick={handleSave}
           disabled={isClosed || isSaving}
-          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs py-2.5 px-6 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 active:scale-95"
+          className={`font-semibold text-xs py-2.5 px-6 rounded-xl transition flex items-center justify-center gap-2 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+            hasUnsavedChanges
+              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 ring-2 ring-emerald-400/40'
+              : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
+          }`}
         >
           {isSaving ? (
             <>

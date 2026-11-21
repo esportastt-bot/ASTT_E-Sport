@@ -31,7 +31,6 @@ export function computeMonthlyAssignedCounts(
 ): Record<string, number> {
   const counts: Record<string, number> = {};
 
-  // Déterminer le(s) mois couverts par les créneaux (ou startDate) du sondage courant
   const months = new Set<string>();
   for (const s of currentPoll.slots) {
     if (s.dateStr && s.dateStr.length >= 7) {
@@ -72,7 +71,7 @@ export function splitIntoBalancedTeams(selectedIds: string[]): Record<string, 'A
 /**
  * Propose une configuration optimale des sessions en prenant en compte :
  * - Les disponibilités (et uniquement les créneaux non annulés)
- * - Le min et le max de joueurs configurés
+ * - Le min et le max propres à chaque créneau (ou par défaut du sondage)
  * - Le nombre de parties souhaitées sur la période (0 = exclu, null = illimité)
  * - L'équité mensuelle (parties déjà attribuées sur les autres sondages du mois)
  */
@@ -84,7 +83,11 @@ export function generateOptimalSchedule(
   const slotProposals: Record<string, ProposedSlotPlan> = {};
   const assignedInPoll: Record<string, number> = {};
 
-  // Rareté : dans combien de créneaux actifs chaque joueur est disponible
+  const getSlotMin = (slot: (typeof activeSlots)[number]) =>
+    slot.minParticipants ?? poll.minParticipants;
+  const getSlotMax = (slot: (typeof activeSlots)[number]) =>
+    slot.maxParticipants ?? poll.maxParticipants;
+
   const availabilityCount: Record<string, number> = {};
   for (const slot of activeSlots) {
     for (const uid of slot.disponibles) {
@@ -95,7 +98,7 @@ export function generateOptimalSchedule(
   const getDesired = (uid: string): number | null => {
     const val = poll.desiredGamesByUser?.[uid];
     if (typeof val === 'number' && Number.isFinite(val)) return val;
-    return null; // Illimité / non précisé
+    return null;
   };
 
   const getRemainingQuota = (uid: string): number => {
@@ -104,10 +107,9 @@ export function generateOptimalSchedule(
     return Math.max(0, desired - (assignedInPoll[uid] || 0));
   };
 
-  // Créneaux non encore traités
   const remainingSlotIds = new Set(activeSlots.map((s) => s.id));
   const viableSlotsCount = activeSlots.filter(
-    (s) => s.disponibles.length >= poll.minParticipants
+    (s) => s.disponibles.length >= getSlotMin(s)
   ).length;
 
   const scorePlayer = (uid: string): [number, number, number, number] => {
@@ -119,10 +121,10 @@ export function generateOptimalSchedule(
     const monthlyTotal = (monthlyOtherGames[uid] || 0) + assignedHere;
 
     return [
-      assignedHere === 0 ? 0 : 1, // 1. Servir d'abord ceux qui n'ont aucune session ici
-      hasSpecificQuota ? 0 : 1, // 2. Prioriser ceux qui ont exprimé un quota précis
-      -remaining * 10 + rarity, // 3. Plus grand besoin restant & joueurs les moins disponibles
-      monthlyTotal, // 4. Équité sur l'ensemble du mois
+      assignedHere === 0 ? 0 : 1,
+      hasSpecificQuota ? 0 : 1,
+      -remaining * 10 + rarity,
+      monthlyTotal,
     ];
   };
 
@@ -142,13 +144,14 @@ export function generateOptimalSchedule(
 
     for (const slot of activeSlots) {
       if (!remainingSlotIds.has(slot.id)) continue;
-      if (slot.disponibles.length < poll.minParticipants) continue;
+      const slotMin = getSlotMin(slot);
+      const slotMax = getSlotMax(slot);
+      if (slot.disponibles.length < slotMin) continue;
 
       const strictEligible = slot.disponibles.filter((uid) => getRemainingQuota(uid) > 0);
-      if (strictEligible.length < poll.minParticipants) continue;
+      if (strictEligible.length < slotMin) continue;
 
-      // Favoriser les créneaux qui servent des joueurs encore sans session ou rares
-      let slotScore = Math.min(strictEligible.length, poll.maxParticipants) * 100;
+      let slotScore = Math.min(strictEligible.length, slotMax) * 100;
       for (const uid of strictEligible) {
         if ((assignedInPoll[uid] || 0) === 0) slotScore += 25;
         slotScore += Math.max(0, 10 - (availabilityCount[uid] || 10));
@@ -164,8 +167,9 @@ export function generateOptimalSchedule(
     if (!bestSlot) break;
 
     remainingSlotIds.delete(bestSlot.id);
+    const slotMax = getSlotMax(bestSlot);
     const sorted = [...bestStrictEligible].sort(comparePlayers);
-    const selectedIds = sorted.slice(0, poll.maxParticipants);
+    const selectedIds = sorted.slice(0, slotMax);
     const waitlistIds = bestSlot.disponibles.filter(
       (uid) => !selectedIds.includes(uid) && getDesired(uid) !== 0
     );
@@ -180,20 +184,20 @@ export function generateOptimalSchedule(
       waitlistIds,
       teamAssignments: splitIntoBalancedTeams(selectedIds),
       reachedMin: true,
-      reason: `Optimal : ${selectedIds.length} titulaire(s) retenu(s) selon les quotas et l'équité du mois.`,
+      reason: `Optimal : ${selectedIds.length} titulaire(s) retenu(s) (Min ${getSlotMin(bestSlot)} / Max ${slotMax}).`,
     };
   }
 
-  // Pour les créneaux restants non planifiés : signaler clairement la raison sans dépasser les quotas
   for (const slot of activeSlots) {
     if (slotProposals[slot.id]) continue;
 
+    const slotMin = getSlotMin(slot);
     const interested = slot.disponibles.filter((uid) => getDesired(uid) !== 0);
     const strictRemaining = interested.filter((uid) => getRemainingQuota(uid) > 0);
 
-    let reason = `Effectif insuffisant (${slot.disponibles.length}/${poll.minParticipants} min).`;
-    if (slot.disponibles.length >= poll.minParticipants && strictRemaining.length < poll.minParticipants) {
-      reason = `Non retenu automatiquement : les joueurs disponibles ont déjà atteint leur quota souhaité (${strictRemaining.length}/${poll.minParticipants} restant(s)). Vous pouvez tout de même sélectionner manuellement.`;
+    let reason = `Effectif insuffisant (${slot.disponibles.length}/${slotMin} min).`;
+    if (slot.disponibles.length >= slotMin && strictRemaining.length < slotMin) {
+      reason = `Non retenu automatiquement : les joueurs disponibles ont déjà atteint leur quota souhaité (${strictRemaining.length}/${slotMin} restant(s)). Vous pouvez tout de même sélectionner manuellement.`;
     }
 
     slotProposals[slot.id] = {
@@ -206,7 +210,6 @@ export function generateOptimalSchedule(
     };
   }
 
-  // Statistiques de couverture des souhaits
   const allKnownPlayers = new Set<string>(poll.targetUsers || []);
   for (const s of activeSlots) {
     s.disponibles.forEach((u) => allKnownPlayers.add(u));

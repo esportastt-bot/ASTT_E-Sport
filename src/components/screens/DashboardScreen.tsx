@@ -104,7 +104,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const closedPolls = polls.filter((p) => p.status === 'CLOSED' || p.status === 'CANCELLED');
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto px-4 py-6" onClick={() => setOpenMenuId(null)}>
+    <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6" onClick={() => setOpenMenuId(null)}>
 
       {/* Top Banner / Welcome */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
@@ -173,7 +173,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
       {/* Poll Cards */}
       {!loading && openPolls.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {openPolls.map((poll) => {
             const activeSlots = poll.slots.filter((s) => !s.cancelled);
             const totalSlots = activeSlots.length;
@@ -369,7 +369,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
             Sondages terminés ou annulés ({closedPolls.length})
           </h4>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {closedPolls.map((poll) => {
               const canManage = canManagePoll(poll);
               return (

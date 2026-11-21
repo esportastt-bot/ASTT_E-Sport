@@ -1,6 +1,6 @@
 import React from 'react';
 import type { UserProfile } from '../types';
-import { PlusCircle, LogOut, SlidersHorizontal } from 'lucide-react';
+import { Home, PlusCircle, LogOut, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { UserAvatar } from './UserAvatar';
 
@@ -10,23 +10,26 @@ interface NavbarProps {
   currentScreen: AppScreen;
   setScreen: (screen: AppScreen) => void;
   currentUser: UserProfile;
+  onLogout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentScreen,
   setScreen,
   currentUser,
+  onLogout,
 }) => {
   const { logout } = useAuth();
+  const handleLogoutClick = onLogout || logout;
 
   return (
     <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
-      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
-        {/* Brand - Clique pour revenir au Tableau de bord */}
+      <div className="max-w-[1440px] w-full mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+        {/* Brand - Clique pour revenir à l'accueil */}
         <div
           className="flex items-center gap-3 cursor-pointer group min-w-0"
           onClick={() => setScreen('dashboard')}
-          title="Retour aux sondages"
+          title="Retour à l'accueil"
         >
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-emerald-500 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition shrink-0">
             A
@@ -39,8 +42,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Actions droite : Pilotage + Créer sondage + Profil + Déconnexion */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        {/* Actions droite : Accueil + Pilotage + Créer sondage + Profil + Déconnexion */}
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          <button
+            type="button"
+            onClick={() => setScreen('dashboard')}
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
+              currentScreen === 'dashboard'
+                ? 'bg-slate-700 border-slate-500 text-white shadow'
+                : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
+            }`}
+            title="Retour à l'accueil"
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Accueil</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setScreen('cockpit')}
@@ -71,7 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Profil utilisateur connecté */}
           <div className="flex items-center gap-2 bg-slate-950/60 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs">
             <UserAvatar avatar={currentUser.avatar} name={currentUser.name} size="sm" />
-            <span className="font-medium text-white max-w-[110px] truncate hidden md:inline">
+            <span className="font-medium text-white max-w-[120px] truncate hidden md:inline">
               {currentUser.name}
             </span>
             <span
@@ -88,7 +105,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Bouton Déconnexion */}
           <button
             type="button"
-            onClick={logout}
+            onClick={handleLogoutClick}
             title="Se déconnecter"
             className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-red-950/50 hover:text-red-400 hover:border-red-800/60 border border-slate-700 flex items-center justify-center text-slate-400 transition shrink-0"
           >

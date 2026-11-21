@@ -21,12 +21,30 @@ export function subscribeToSlotProfiles(
     (snapshot) => {
       const list: SlotProfile[] = snapshot.docs.map((docSnap) => {
         const d = docSnap.data();
+        const rawDays = Array.isArray(d.days) ? d.days : [];
+        const days = rawDays.map((day: any) => ({
+          dayName: String(day?.dayName || ''),
+          active: Boolean(day?.active),
+          slots: Array.isArray(day?.slots)
+            ? day.slots.map((s: any) => ({
+                startTime: String(s?.startTime || '20:30'),
+                endTime: String(s?.endTime || '21:50'),
+                ...(typeof s?.minParticipants === 'number'
+                  ? { minParticipants: s.minParticipants }
+                  : {}),
+                ...(typeof s?.maxParticipants === 'number'
+                  ? { maxParticipants: s.maxParticipants }
+                  : {}),
+              }))
+            : [],
+        }));
+
         return {
           id: docSnap.id,
           name: d.name || 'Profil sans nom',
           createdBy: d.created_by || '',
           createdByName: d.created_by_name || '',
-          days: Array.isArray(d.days) ? d.days : [],
+          days,
           trainingType: d.training_type || undefined,
           minParticipants:
             typeof d.min_participants === 'number' ? d.min_participants : undefined,
@@ -58,6 +76,12 @@ export async function saveSlotProfile(
       slots: d.slots.map((s) => ({
         startTime: s.startTime,
         endTime: s.endTime,
+        ...(typeof s.minParticipants === 'number'
+          ? { minParticipants: s.minParticipants }
+          : {}),
+        ...(typeof s.maxParticipants === 'number'
+          ? { maxParticipants: s.maxParticipants }
+          : {}),
       })),
     })),
     training_type: profile.trainingType || null,

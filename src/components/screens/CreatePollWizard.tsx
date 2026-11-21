@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   TRAINING_TYPE_LABELS,
   type SlotProfile,
@@ -20,6 +20,7 @@ import {
 
 interface CreatePollWizardProps {
   currentUser: UserProfile;
+  onDirtyChange?: (dirty: boolean) => void;
   onCancel: () => void;
   onPublish: (pollData: any) => Promise<void> | void;
 }
@@ -27,6 +28,8 @@ interface CreatePollWizardProps {
 interface DaySlotForm {
   startTime: string;
   endTime: string;
+  minParticipants: number;
+  maxParticipants: number;
 }
 
 interface DayConfig {
@@ -39,6 +42,7 @@ interface DayConfig {
 
 export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
   currentUser,
+  onDirtyChange,
   onCancel,
   onPublish,
 }) => {
@@ -55,6 +59,16 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
 
   const [step, setStep] = useState<number>(1);
   const totalSteps = 4;
+  const [hasEdits, setHasEdits] = useState(false);
+
+  useEffect(() => {
+    onDirtyChange?.(hasEdits);
+  }, [hasEdits, onDirtyChange]);
+
+  const markDirty = () => {
+    setHasEdits(true);
+    setPublishError(null);
+  };
 
   // Semaine sélectionnée (par défaut : semaine prochaine)
   const [selectedMonday, setSelectedMonday] = useState<Date>(() =>
@@ -68,6 +82,8 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
   // Form State
   const [title, setTitle] = useState(`Entraînements ${weekLabel}`);
   const [trainingType, setTrainingType] = useState<TrainingType>('ASTT');
+  const [minParticipants, setMinParticipants] = useState(4);
+  const [maxParticipants, setMaxParticipants] = useState(8);
 
   // Configuration des jours et créneaux individuels
   const [days, setDays] = useState<DayConfig[]>(() => {
@@ -80,7 +96,9 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         dateStr: formatISODate(dayDate),
         dayName: d.dayName,
         active: isWeekday,
-        slots: isWeekday ? [{ startTime: '20:30', endTime: '21:50' }] : [],
+        slots: isWeekday
+          ? [{ startTime: '20:30', endTime: '21:50', minParticipants: 4, maxParticipants: 8 }]
+          : [],
       };
     });
   });
@@ -97,9 +115,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
   );
   const [deadlineTime, setDeadlineTime] = useState('20:00');
 
-  // Participants & Limites (RIEN n'est coché à la base)
-  const [minParticipants, setMinParticipants] = useState(4);
-  const [maxParticipants, setMaxParticipants] = useState(8);
+  // Participants (RIEN n'est coché à la base)
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [manuallyAddedIds, setManuallyAddedIds] = useState<string[]>([]);
@@ -108,7 +124,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
 
-  // Met à jour la semaine, le titre, les dates de chaque jour ET la date de clôture
   const applyWeekMonday = (newMonday: Date) => {
     setSelectedMonday(newMonday);
     const newWeekNum = getWeekNumber(newMonday);
@@ -127,14 +142,46 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         };
       })
     );
+    markDirty();
   };
 
   const changeWeek = (offsetWeeks: number) => {
     applyWeekMonday(addDays(selectedMonday, offsetWeeks * 7));
   };
 
-  // Charger un profil (ex: Profil HFGET) dans les jours de la semaine en cours
+  const updateDefaultMin = (nextVal: number) => {
+    const prevDefault = minParticipants;
+    setMinParticipants(nextVal);
+    setDays((prev) =>
+      prev.map((d) => ({
+        ...d,
+        slots: d.slots.map((s) =>
+          s.minParticipants === prevDefault ? { ...s, minParticipants: nextVal } : s
+        ),
+      }))
+    );
+    markDirty();
+  };
+
+  const updateDefaultMax = (nextVal: number) => {
+    const prevDefault = maxParticipants;
+    setMaxParticipants(nextVal);
+    setDays((prev) =>
+      prev.map((d) => ({
+        ...d,
+        slots: d.slots.map((s) =>
+          s.maxParticipants === prevDefault ? { ...s, maxParticipants: nextVal } : s
+        ),
+      }))
+    );
+    markDirty();
+  };
+
+  // Charger un profil (ex: Profil HFGET)
   const handleLoadSlotProfile = (profile: SlotProfile) => {
+    const defMin = typeof profile.minParticipants === 'number' ? profile.minParticipants : minParticipants;
+    const defMax = typeof profile.maxParticipants === 'number' ? profile.maxParticipants : maxParticipants;
+
     setDays((prev) =>
       prev.map((day) => {
         const match = profile.days.find((pd) => pd.dayName === day.dayName);
@@ -145,6 +192,8 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           slots: match.slots.map((s) => ({
             startTime: s.startTime || '20:30',
             endTime: s.endTime || '21:50',
+            minParticipants: typeof s.minParticipants === 'number' ? s.minParticipants : defMin,
+            maxParticipants: typeof s.maxParticipants === 'number' ? s.maxParticipants : defMax,
           })),
         };
       })
@@ -154,8 +203,9 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
     if (typeof profile.maxParticipants === 'number') setMaxParticipants(profile.maxParticipants);
     setLoadedProfileName(profile.name);
     setProfileMessage(
-      `Profil « ${profile.name} » chargé. Vous pouvez maintenant modifier librement chaque jour ou horaire.`
+      `Profil « ${profile.name} » chargé. Vous pouvez maintenant modifier librement chaque jour, horaire ou min/max.`
     );
+    markDirty();
   };
 
   // Enregistrer le planning actuel comme profil réutilisable
@@ -183,7 +233,12 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         days: days.map((d) => ({
           dayName: d.dayName,
           active: d.active,
-          slots: d.slots.map((s) => ({ startTime: s.startTime, endTime: s.endTime })),
+          slots: d.slots.map((s) => ({
+            startTime: s.startTime,
+            endTime: s.endTime,
+            minParticipants: s.minParticipants,
+            maxParticipants: s.maxParticipants,
+          })),
         })),
       });
 
@@ -217,14 +272,15 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         active: newActive,
         slots:
           newActive && target.slots.length === 0
-            ? [{ startTime: '20:30', endTime: '21:50' }]
+            ? [{ startTime: '20:30', endTime: '21:50', minParticipants, maxParticipants }]
             : target.slots,
       };
       return copy;
     });
+    markDirty();
   };
 
-  // Ajouter un créneau à un jour spécifique
+  // Ajouter un créneau à un jour spécifique (hérite du min/max du jour ou des valeurs par défaut)
   const addSlotToDay = (dayIndex: number) => {
     setDays((prev) => {
       const copy = [...prev];
@@ -239,13 +295,21 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       copy[dayIndex] = {
         ...target,
         active: true,
-        slots: [...target.slots, { startTime: newStart, endTime: newEnd }],
+        slots: [
+          ...target.slots,
+          {
+            startTime: newStart,
+            endTime: newEnd,
+            minParticipants: lastSlot?.minParticipants ?? minParticipants,
+            maxParticipants: lastSlot?.maxParticipants ?? maxParticipants,
+          },
+        ],
       };
       return copy;
     });
+    markDirty();
   };
 
-  // Supprimer un créneau
   const removeSlotFromDay = (dayIndex: number, slotIndex: number) => {
     setDays((prev) => {
       const copy = [...prev];
@@ -258,9 +322,9 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       };
       return copy;
     });
+    markDirty();
   };
 
-  // Modifier horaire d'un créneau
   const updateSlotTime = (
     dayIndex: number,
     slotIndex: number,
@@ -275,9 +339,45 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       copy[dayIndex] = { ...target, slots: newSlots };
       return copy;
     });
+    markDirty();
   };
 
-  // Cocher / décocher un rôle Discord : bascule auto vers/depuis "Membres concernés"
+  const updateSlotParticipants = (
+    dayIndex: number,
+    slotIndex: number,
+    field: 'minParticipants' | 'maxParticipants',
+    value: number
+  ) => {
+    setDays((prev) => {
+      const copy = [...prev];
+      const target = copy[dayIndex];
+      const newSlots = [...target.slots];
+      newSlots[slotIndex] = { ...newSlots[slotIndex], [field]: value };
+      copy[dayIndex] = { ...target, slots: newSlots };
+      return copy;
+    });
+    markDirty();
+  };
+
+  // Appliquer un Min ou Max à tous les créneaux d'un jour donné
+  const applyDayParticipants = (
+    dayIndex: number,
+    field: 'minParticipants' | 'maxParticipants',
+    value: number
+  ) => {
+    setDays((prev) => {
+      const copy = [...prev];
+      const target = copy[dayIndex];
+      copy[dayIndex] = {
+        ...target,
+        slots: target.slots.map((s) => ({ ...s, [field]: value })),
+      };
+      return copy;
+    });
+    markDirty();
+  };
+
+  // Cocher / décocher un rôle Discord
   const toggleDiscordRole = (roleId: string) => {
     const isCurrentlySelected = selectedRoleIds.includes(roleId);
 
@@ -298,35 +398,37 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           if (manuallyAddedIds.includes(uid)) return true;
           const member = guildMembers.find((m) => m.discordId === uid);
           if (!member) return false;
-          // Conserver uniquement si le membre possède encore un autre rôle coché
           return member.roleIds.some((rId) => nextRoleIds.includes(rId));
         })
       );
     }
+    markDirty();
   };
 
-  // Basculer un membre vers "Membres concernés" (clic dans la zone gauche)
   const addMemberToTarget = (discordId: string) => {
     setSelectedMemberIds((prev) => (prev.includes(discordId) ? prev : [...prev, discordId]));
     setManuallyAddedIds((prev) => (prev.includes(discordId) ? prev : [...prev, discordId]));
+    markDirty();
   };
 
-  // Retirer un membre de "Membres concernés" (clic dans la zone droite, même s'il a un rôle coché)
   const removeMemberFromTarget = (discordId: string) => {
     setSelectedMemberIds((prev) => prev.filter((id) => id !== discordId));
     setManuallyAddedIds((prev) => prev.filter((id) => id !== discordId));
+    markDirty();
   };
 
   const addAllAvailableMembers = () => {
     const allIds = guildMembers.map((m) => m.discordId);
     setSelectedMemberIds(allIds);
     setManuallyAddedIds(allIds);
+    markDirty();
   };
 
   const clearSelectedMembers = () => {
     setSelectedMemberIds([]);
     setManuallyAddedIds([]);
     setSelectedRoleIds([]);
+    markDirty();
   };
 
   const selectedMembersList = useMemo(
@@ -368,9 +470,30 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       return;
     }
     if (minParticipants > maxParticipants) {
-      setPublishError('Le minimum de participants ne peut pas dépasser la capacité maximale.');
+      setPublishError('Le minimum par défaut ne peut pas dépasser le maximum par défaut.');
       return;
     }
+
+    // Validation Min / Max sur chaque créneau configuré
+    for (const d of days) {
+      if (!d.active) continue;
+      for (let i = 0; i < d.slots.length; i++) {
+        const s = d.slots[i];
+        if (s.minParticipants < 2) {
+          setPublishError(
+            `${d.dayName} (créneau ${i + 1}) : le minimum doit être d'au moins 2 joueurs.`
+          );
+          return;
+        }
+        if (s.minParticipants > s.maxParticipants) {
+          setPublishError(
+            `${d.dayName} (${s.startTime}–${s.endTime}) : le minimum (${s.minParticipants}) ne peut pas dépasser le maximum (${s.maxParticipants}).`
+          );
+          return;
+        }
+      }
+    }
+
     if (!deadlineDate || !deadlineTime) {
       setPublishError('Veuillez renseigner une date et une heure de clôture valides.');
       return;
@@ -392,6 +515,8 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
             dayName: d.dayName,
             startTime: s.startTime,
             endTime: s.endTime,
+            minParticipants: s.minParticipants,
+            maxParticipants: s.maxParticipants,
             disponibles: [],
             incertains: [],
             indisponibles: [],
@@ -421,6 +546,8 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         excludedUsers: [],
         slots: finalSlots,
       });
+      setHasEdits(false);
+      onDirtyChange?.(false);
     } catch (err: any) {
       console.error('Erreur publication sondage:', err);
       setPublishError(err?.message || 'Impossible de publier le sondage sur Firestore.');
@@ -430,35 +557,44 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6">
 
       {/* Top Breadcrumb */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
         <div>
           <button
+            type="button"
             onClick={onCancel}
             className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition mb-1"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            Retour au tableau de bord
+            Retour à l'accueil
           </button>
           <h2 className="text-xl font-bold text-white">Créer un sondage hebdomadaire</h2>
         </div>
 
-        {step < 4 && (
-          <button
-            type="button"
-            onClick={() => setStep(4)}
-            className="text-xs bg-slate-800 hover:bg-slate-700 text-indigo-300 px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>Récapitulatif</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {hasEdits && (
+            <span className="text-[11px] bg-amber-950/70 border border-amber-600/50 text-amber-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              Sondage non encore publié
+            </span>
+          )}
+          {step < 4 && (
+            <button
+              type="button"
+              onClick={() => setStep(4)}
+              className="text-xs bg-slate-800 hover:bg-slate-700 text-indigo-300 px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Récapitulatif</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Steps Indicator */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-4 gap-2 sm:gap-3">
         {[
           { num: 1, title: 'Semaine & Type', icon: Settings2 },
           { num: 2, title: 'Créneaux & Profils', icon: Calendar },
@@ -474,7 +610,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               key={s.num}
               type="button"
               onClick={() => setStep(s.num)}
-              className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${
+              className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
                 isActive
                   ? 'bg-indigo-950/60 border-indigo-500 text-white shadow-md shadow-indigo-950/30'
                   : isPassed
@@ -502,7 +638,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
       </div>
 
       {/* Step Content */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-6">
+      <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-6">
 
         {/* STEP 1: SEMAINE & TYPE */}
         {step === 1 && (
@@ -512,7 +648,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               Étape 1 : Choix de la semaine & Informations
             </h3>
 
-            {/* Sélecteur de Semaine */}
             <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
               <label className="text-xs font-medium text-slate-300 flex items-center justify-between">
                 <span>Semaine concernée :</span>
@@ -564,18 +699,19 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               </div>
             </div>
 
-            {/* Titre du sondage */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-slate-300">Titre du sondage</label>
               <input
                 type="text"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  markDirty();
+                }}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition"
               />
             </div>
 
-            {/* Type de session (4 choix incluant Entraînement) */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-slate-300">Type de session</label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -583,7 +719,10 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                   <button
                     key={t}
                     type="button"
-                    onClick={() => setTrainingType(t)}
+                    onClick={() => {
+                      setTrainingType(t);
+                      markDirty();
+                    }}
                     className={`py-3 px-3 rounded-xl border text-sm font-semibold transition ${
                       trainingType === t
                         ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/25'
@@ -596,28 +735,31 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               </div>
             </div>
 
-            {/* Min & Max participants */}
-            <div className="grid grid-cols-2 gap-4 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Min. participants requis</label>
+                <label className="text-xs font-medium text-slate-300">
+                  Min. participants par défaut (modifiable par jour et créneau à l'étape 2)
+                </label>
                 <input
                   type="number"
-                  min="2"
-                  max="16"
+                  min={2}
+                  max={20}
                   value={minParticipants}
-                  onChange={(e) => setMinParticipants(parseInt(e.target.value, 10) || 4)}
+                  onChange={(e) => updateDefaultMin(parseInt(e.target.value, 10) || 4)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Capacité maximale</label>
+                <label className="text-xs font-medium text-slate-300">
+                  Max. participants par défaut (modifiable par jour et créneau à l'étape 2)
+                </label>
                 <input
                   type="number"
-                  min="2"
-                  max="16"
+                  min={2}
+                  max={20}
                   value={maxParticipants}
-                  onChange={(e) => setMaxParticipants(parseInt(e.target.value, 10) || 8)}
+                  onChange={(e) => updateDefaultMax(parseInt(e.target.value, 10) || 8)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -625,17 +767,17 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           </div>
         )}
 
-        {/* STEP 2: PROFILS & CRÉNEAUX PAR JOUR */}
+        {/* STEP 2: PROFILS & CRÉNEAUX PAR JOUR (AVEC MIN/MAX PAR JOUR ET CRÉNEAU) */}
         {step === 2 && (
           <div className="space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-base font-semibold text-white flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-indigo-400" />
-                  Étape 2 : Profils & Créneaux horaires
+                  Étape 2 : Profils, Créneaux & Capacités par jour / créneau
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Chargez un profil pré-enregistré (ex: Profil HFGET) ou configurez chaque jour librement.
+                  Chargez un profil pré-enregistré ou réglez librement les horaires et le min/max de joueurs par jour ou créneau individuel.
                 </p>
               </div>
 
@@ -707,7 +849,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 </p>
               )}
 
-              {/* Sauvegarder le planning actuel comme profil */}
               <div className="flex flex-col sm:flex-row gap-2 pt-1">
                 <input
                   type="text"
@@ -731,15 +872,23 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 </button>
               </div>
 
+              {newProfileName.trim() !== '' && (
+                <p className="text-[11px] text-amber-300">
+                  Nom de profil saisi non encore enregistré — cliquez sur « Enregistrer ce planning en profil ».
+                </p>
+              )}
+
               {profileMessage && (
                 <p className="text-[11px] text-emerald-300">{profileMessage}</p>
               )}
             </div>
 
-            {/* Liste des jours de la semaine (sans bouton "Copier sur les autres jours") */}
+            {/* Liste des jours de la semaine */}
             <div className="space-y-3">
               {days.map((day, dayIdx) => {
                 const dayDateFormatted = formatFRDate(day.date);
+                const dayMinVal = day.slots[0]?.minParticipants ?? minParticipants;
+                const dayMaxVal = day.slots[0]?.maxParticipants ?? maxParticipants;
 
                 return (
                   <div
@@ -750,7 +899,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                         : 'bg-slate-950/30 border-slate-800 opacity-60'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 pb-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
                       <div className="flex items-center gap-3">
                         <input
                           type="checkbox"
@@ -771,14 +920,59 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                       </div>
 
                       {day.active && (
-                        <button
-                          type="button"
-                          onClick={() => addSlotToDay(dayIdx)}
-                          className="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-2.5 py-1 rounded-lg transition flex items-center gap-1 shadow-sm"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Ajouter créneau</span>
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* Contrôles rapides Min / Max pour tout le jour */}
+                          {day.slots.length > 0 && (
+                            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
+                              <span className="text-slate-400">Jour :</span>
+                              <label className="flex items-center gap-1 text-slate-300">
+                                <span>Min</span>
+                                <input
+                                  type="number"
+                                  min={2}
+                                  max={20}
+                                  value={dayMinVal}
+                                  onChange={(e) =>
+                                    applyDayParticipants(
+                                      dayIdx,
+                                      'minParticipants',
+                                      parseInt(e.target.value, 10) || 2
+                                    )
+                                  }
+                                  className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
+                                  title="Appliquer ce minimum à tous les créneaux de ce jour"
+                                />
+                              </label>
+                              <label className="flex items-center gap-1 text-slate-300">
+                                <span>Max</span>
+                                <input
+                                  type="number"
+                                  min={2}
+                                  max={20}
+                                  value={dayMaxVal}
+                                  onChange={(e) =>
+                                    applyDayParticipants(
+                                      dayIdx,
+                                      'maxParticipants',
+                                      parseInt(e.target.value, 10) || 8
+                                    )
+                                  }
+                                  className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
+                                  title="Appliquer ce maximum à tous les créneaux de ce jour"
+                                />
+                              </label>
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => addSlotToDay(dayIdx)}
+                            className="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 shadow-sm"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Ajouter créneau</span>
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -787,7 +981,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                         {day.slots.map((slot, slotIdx) => (
                           <div
                             key={slotIdx}
-                            className="flex flex-wrap items-center gap-2 bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl text-xs"
+                            className="flex flex-wrap items-center gap-2.5 bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl text-xs"
                           >
                             <span className="text-slate-400 font-medium shrink-0">
                               Créneau {slotIdx + 1} :
@@ -815,6 +1009,45 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                                 }
                                 className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                               />
+                            </div>
+
+                            <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800 px-2.5 py-1 rounded-lg">
+                              <label className="flex items-center gap-1 text-[11px] text-slate-300">
+                                <span className="text-slate-400">Min</span>
+                                <input
+                                  type="number"
+                                  min={2}
+                                  max={20}
+                                  value={slot.minParticipants}
+                                  onChange={(e) =>
+                                    updateSlotParticipants(
+                                      dayIdx,
+                                      slotIdx,
+                                      'minParticipants',
+                                      parseInt(e.target.value, 10) || 2
+                                    )
+                                  }
+                                  className="w-12 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
+                                />
+                              </label>
+                              <label className="flex items-center gap-1 text-[11px] text-slate-300">
+                                <span className="text-slate-400">Max</span>
+                                <input
+                                  type="number"
+                                  min={2}
+                                  max={20}
+                                  value={slot.maxParticipants}
+                                  onChange={(e) =>
+                                    updateSlotParticipants(
+                                      dayIdx,
+                                      slotIdx,
+                                      'maxParticipants',
+                                      parseInt(e.target.value, 10) || 8
+                                    )
+                                  }
+                                  className="w-12 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
+                                />
+                              </label>
                             </div>
 
                             <span className="text-[10px] text-slate-400">
@@ -857,13 +1090,19 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 <input
                   type="date"
                   value={deadlineDate}
-                  onChange={(e) => setDeadlineDate(e.target.value)}
+                  onChange={(e) => {
+                    setDeadlineDate(e.target.value);
+                    markDirty();
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                 />
                 <input
                   type="time"
                   value={deadlineTime}
-                  onChange={(e) => setDeadlineTime(e.target.value)}
+                  onChange={(e) => {
+                    setDeadlineTime(e.target.value);
+                    markDirty();
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -871,7 +1110,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           </div>
         )}
 
-        {/* STEP 3: PARTICIPANTS (RÔLES NON COCHÉS + 2 ZONES DISCORD) */}
+        {/* STEP 3: PARTICIPANTS (2 ZONES DISCORD) */}
         {step === 3 && (
           <div className="space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -903,7 +1142,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               </div>
             )}
 
-            {/* Rôles Discord (rien coché par défaut) */}
+            {/* Rôles Discord */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-slate-300">
                 Rôles Discord (cliquer pour basculer les membres du rôle) :
@@ -948,10 +1187,8 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               )}
             </div>
 
-            {/* 2 Zones côte à côte : Tous les membres vs Membres concernés */}
+            {/* 2 Zones côte à côte */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800">
-
-              {/* ZONE GAUCHE : Tous les membres du serveur */}
               <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-slate-200">
@@ -978,7 +1215,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                   />
                 </div>
 
-                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
                   {directoryLoading && guildMembers.length === 0 ? (
                     <div className="flex items-center justify-center py-8 text-xs text-slate-400 gap-2">
                       <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
@@ -1017,7 +1254,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 </div>
               </div>
 
-              {/* ZONE DROITE : Membres concernés */}
               <div className="bg-slate-950/70 border border-emerald-500/30 rounded-2xl p-3.5 flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-emerald-300">
@@ -1038,7 +1274,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                   Cliquez sur un membre pour le retirer de ce sondage (même s'il appartient à un rôle coché).
                 </p>
 
-                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
                   {selectedMembersList.length === 0 ? (
                     <p className="text-xs text-slate-500 italic text-center py-8">
                       Aucun membre sélectionné pour le moment.
@@ -1071,7 +1307,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                   )}
                 </div>
               </div>
-
             </div>
           </div>
         )}
@@ -1110,7 +1345,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 </span>
               </div>
               <div className="flex justify-between gap-2 border-b border-slate-800/80 pb-2">
-                <span className="text-slate-400">Min / Max :</span>
+                <span className="text-slate-400">Min / Max par défaut :</span>
                 <span className="font-semibold text-white">
                   {minParticipants} min / {maxParticipants} max
                 </span>
@@ -1125,7 +1360,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
 
             <div className="space-y-2">
               <p className="text-xs font-semibold text-slate-300">Détail des créneaux retenus :</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                 {days
                   .filter((d) => d.active && d.slots.length > 0)
                   .map((d) => (
@@ -1136,7 +1371,10 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                       <div className="mt-1 space-y-0.5">
                         {d.slots.map((s, idx) => (
                           <div key={idx} className="text-indigo-300 font-mono text-[11px]">
-                            • {s.startTime} à {s.endTime}
+                            • {s.startTime} à {s.endTime}{' '}
+                            <span className="text-slate-400">
+                              ({s.minParticipants}–{s.maxParticipants} joueurs)
+                            </span>
                           </div>
                         ))}
                       </div>
