@@ -1,23 +1,25 @@
 import React, { useState } from 'react';
-import {
-  TRAINING_TYPE_BADGE_CLASSES,
-  TRAINING_TYPE_LABELS,
-  type Poll,
-  type TrainingType,
-  type UserProfile,
-} from '../../types';
+import type { Poll, UserProfile } from '../../types';
 import {
   PlusCircle, Clock, Users, ArrowRight, CheckCircle2,
   AlertCircle, Trash2, Ban, MoreVertical, Calendar, Loader2,
-  Share2, Check, Lock, RotateCcw, AlertTriangle, SlidersHorizontal
+  Share2, Check, Lock, RotateCcw, AlertTriangle, SlidersHorizontal, Send
 } from 'lucide-react';
 import { UserAvatar } from '../UserAvatar';
 import { formatFRDateTime, formatShortFRDate } from '../../utils/dateUtils';
+
+export interface DashboardNotificationBanner {
+  type: 'success' | 'warning';
+  title: string;
+  details?: string[];
+}
 
 interface DashboardScreenProps {
   currentUser: UserProfile;
   polls: Poll[];
   loading?: boolean;
+  notificationBanner?: DashboardNotificationBanner | null;
+  onDismissNotification?: () => void;
   onSelectPoll: (pollId: string, action: 'vote' | 'cockpit') => void;
   onCreatePoll: () => void;
   onDeletePoll?: (pollId: string) => Promise<void> | void;
@@ -30,6 +32,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   currentUser,
   polls,
   loading = false,
+  notificationBanner = null,
+  onDismissNotification,
   onSelectPoll,
   onCreatePoll,
   onDeletePoll,
@@ -141,6 +145,44 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         </button>
       </div>
 
+      {/* Notification MP Discord / Publication */}
+      {notificationBanner && (
+        <div
+          className={`text-xs rounded-xl p-3.5 border flex items-start justify-between gap-3 animate-fade-slide-up ${
+            notificationBanner.type === 'success'
+              ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-100'
+              : 'bg-amber-950/60 border-amber-700/60 text-amber-100'
+          }`}
+        >
+          <div className="space-y-1 min-w-0">
+            <p className="font-semibold flex items-center gap-2">
+              <Send
+                className={`w-4 h-4 shrink-0 ${
+                  notificationBanner.type === 'success' ? 'text-emerald-400' : 'text-amber-400'
+                }`}
+              />
+              <span>{notificationBanner.title}</span>
+            </p>
+            {notificationBanner.details && notificationBanner.details.length > 0 && (
+              <ul className="list-disc pl-6 space-y-0.5 text-[11px] opacity-90">
+                {notificationBanner.details.map((detail, idx) => (
+                  <li key={idx}>{detail}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {onDismissNotification && (
+            <button
+              type="button"
+              onClick={onDismissNotification}
+              className="px-2 py-0.5 rounded hover:bg-white/10 transition shrink-0"
+            >
+              Fermer
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Inline Action Error */}
       {actionError && (
         <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center justify-between gap-2">
@@ -208,33 +250,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="space-y-3">
-                  {/* Top row : Badges + Actions (en flex sans recouvrement) */}
+                  {/* Top row : Voyant statut uniquement + Actions */}
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                      {Array.from(
-                        new Set(
-                          (poll.slots.filter((s) => !s.cancelled).length > 0
-                            ? poll.slots.filter((s) => !s.cancelled)
-                            : poll.slots
-                          ).map((s) => s.trainingType || poll.type)
-                        )
-                      ).map((t: TrainingType) => (
-                        <span
-                          key={t}
-                          className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg border ${TRAINING_TYPE_BADGE_CLASSES[t] || 'bg-indigo-900/40 text-indigo-300 border-indigo-700/40'}`}
-                        >
-                          {TRAINING_TYPE_LABELS[t] || t}
-                        </span>
-                      ))}
                       <span className="bg-emerald-900/30 text-emerald-400 text-xs font-medium px-2 py-0.5 rounded-lg border border-emerald-700/30 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                         Ouvert
                       </span>
-                      {canManage && (
-                        <span className="bg-amber-500/10 text-amber-300 text-[10px] font-medium px-2 py-0.5 rounded-lg border border-amber-500/25">
-                          Organisateur
-                        </span>
-                      )}
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">

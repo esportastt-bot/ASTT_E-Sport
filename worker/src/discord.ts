@@ -177,3 +177,179 @@ export function getAvatarUrl(user: DiscordUser): string {
   }
   return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.webp?size=128`;
 }
+
+export interface DiscordEmbedField {
+  name: string;
+  value: string;
+  inline?: boolean;
+}
+
+export interface DiscordEmbed {
+  title?: string;
+  description?: string;
+  url?: string;
+  color?: number;
+  fields?: DiscordEmbedField[];
+  footer?: { text: string };
+}
+
+export interface DiscordDmPayload {
+  content?: string;
+  embeds?: DiscordEmbed[];
+}
+
+export type DirectMessageResult =
+  | { ok: true }
+  | { ok: false; code?: number; reason: string };
+
+const dmChannelCache = new Map<string, string>();
+
+async function discordBotFetchWithRetry(
+  url: string,
+  botToken: string,
+  init: RequestInit
+): Promise<Response> {
+  const doFetch = () =>
+    fetch(url, {
+      ...init,
+      headers: {
+        ...DISCORD_HEADERS,
+        'Content-Type': 'application/json',
+        Authorization: `Bot ${botToken}`,
+        ...(init.headers || {}),
+      },
+    });
+
+  let res = await doFetch();
+  if (res.status === 429) {
+    let waitMs = 1500;
+    try {
+      const body = (await res.json()) as { retry_after?: number };
+      if (typeof body.retry_after === 'number' && Number.isFinite(body.retry_after)) {
+        waitMs = Math.min(4000, Math.max(250, Math.ceil(body.retry_after * 1000) + 100));
+      }
+    } catch {
+      // default waitMs
+    }
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+    res = await doFetch();
+  }
+  return res;
+}
+
+async function parseDiscordError(res: Response): Promise<{ code?: number; message?: string }> {
+  try {
+    const data = (await res.json()) as { code?: number; message?: string };
+    return data;
+  } catch {
+    return {};
+  }
+}
+
+/** Envoie un message privé Discord à un utilisateur via le Bot Token (avec cache de salon DM) */
+export async function sendDirectMessage(
+  botToken: string,
+  discordId: string,
+  payload: DiscordDmPayload
+): Promise<DirectMessageResult> {
+  try {
+    let channelId = dmChannelCache.get(discordId);
+
+    const openDmChannel = async (): Promise<string | DirectMessageResult> => {
+      const chRes = await discordBotFetchWithRetry(
+        'https://discord.com/api/v10/users/@me/channels',
+        botToken,
+        {
+          method: 'POST',
+          body: JSON.stringify({ recipient_id: discordId }),
+        }
+      );
+
+      if (!chRes.ok) {
+        const err = await parseDiscordError(chRes);
+        if (chRes.status === 403 || err.code === 50007) {
+          return {
+            ok: false,
+            code: err.code || 50007,
+            reason: 'MP Discord désactivés par ce membre',
+          };
+        }
+        return {
+          ok: false,
+          code: err.code,
+          reason: `Impossible d'ouvrir le MP (HTTP ${chRes.status})`,
+        };
+      }
+
+      const chData = (await chRes.json()) as { id?: string };
+      if (!chData.id) {
+        return { ok: false, reason: 'Canal DM Discord introuvable' };
+      }
+      dmChannelCache.set(discordId, chData.id);
+      return chData.id;
+    };
+
+    const usedCache = Boolean(channelId);
+    if (!channelId) {
+      const opened = await openDmChannel();
+      if (typeof opened !== 'string') return opened;
+      channelId = opened;
+    }
+
+    let msgRes = await discordBotFetchWithRetry(
+      `https://discord.com/api/v10/channels/${channelId}/messages`,
+      botToken,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+
+    // Si le canal en cache est obsolète, on le rouvre une fois
+    if (!msgRes.ok && usedCache && (msgRes.status === 404 || msgRes.status === 403)) {
+      dmChannelCache.delete(discordId);
+      const errFirst = await parseDiscordError(msgRes);
+      if (errFirst.code === 50007) {
+        return {
+          ok: false,
+          code: 50007,
+          reason: 'MP Discord désactivés par ce membre',
+        };
+      }
+      const reopened = await openDmChannel();
+      if (typeof reopened !== 'string') return reopened;
+      channelId = reopened;
+      msgRes = await discordBotFetchWithRetry(
+        `https://discord.com/api/v10/channels/${channelId}/messages`,
+        botToken,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }
+      );
+    }
+
+    if (!msgRes.ok) {
+      const err = await parseDiscordError(msgRes);
+      if (msgRes.status === 403 || err.code === 50007) {
+        return {
+          ok: false,
+          code: err.code || 50007,
+          reason: 'MP Discord désactivés par ce membre',
+        };
+      }
+      return {
+        ok: false,
+        code: err.code,
+        reason: `Erreur Discord (HTTP ${msgRes.status})`,
+      };
+    }
+
+    return { ok: true };
+  } catch (err: any) {
+    return {
+      ok: false,
+      reason: String(err?.message || 'Erreur réseau Discord'),
+    };
+  }
+}

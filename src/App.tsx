@@ -3,9 +3,13 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { usePolls } from './contexts/PollsContext';
 import type { ResponseStatus } from './types';
+import { notifyPollCreatedByDiscord } from './firebase/discordNotifications';
 import { Navbar, type AppScreen } from './components/Navbar';
 import { LoginScreen } from './components/screens/LoginScreen';
-import { DashboardScreen } from './components/screens/DashboardScreen';
+import {
+  DashboardScreen,
+  type DashboardNotificationBanner,
+} from './components/screens/DashboardScreen';
 import { CreatePollWizard } from './components/screens/CreatePollWizard';
 import { MemberVoteScreen } from './components/screens/MemberVoteScreen';
 import { OrganizerCockpitScreen } from './components/screens/OrganizerCockpitScreen';
@@ -40,6 +44,9 @@ export function App() {
   // Garde contre les modifications non sauvegardées (déclenché uniquement au changement de page)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const [dashboardNotice, setDashboardNotice] = useState<DashboardNotificationBanner | null>(
+    null
+  );
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -110,9 +117,30 @@ export function App() {
   };
 
   const handleCreatePollPublish = async (pollData: any) => {
-    await createNewPoll(pollData, pollData.slots || []);
+    const pollId = await createNewPoll(pollData, pollData.slots || []);
     setHasUnsavedChanges(false);
     clearDeepLinkUrl();
+    try {
+      const dm = await notifyPollCreatedByDiscord(pollId, pollData.targetUsers || []);
+      if (dm.failedCount > 0) {
+        setDashboardNotice({
+          type: 'warning',
+          title: `Sondage publié ! ${dm.sentCount}/${dm.totalAuthorized} MP Discord envoyé(s) (${dm.failedCount} échec(s)).`,
+          details: dm.failed.map((f) => `${f.displayName} : ${f.reason}`),
+        });
+      } else {
+        setDashboardNotice({
+          type: 'success',
+          title: `Sondage publié ! ${dm.sentCount}/${dm.totalAuthorized} membre(s) notifié(s) en MP Discord.`,
+        });
+      }
+    } catch (err: any) {
+      setDashboardNotice({
+        type: 'warning',
+        title: 'Sondage publié, mais l’envoi automatique des MP Discord a échoué.',
+        details: [err?.message || 'Erreur lors de la communication avec le bot Discord.'],
+      });
+    }
     setCurrentScreen('dashboard');
   };
 
@@ -173,6 +201,8 @@ export function App() {
                 currentUser={userProfile}
                 polls={polls}
                 loading={pollsLoading}
+                notificationBanner={dashboardNotice}
+                onDismissNotification={() => setDashboardNotice(null)}
                 onSelectPoll={handleSelectPoll}
                 onCreatePoll={() => navigateTo('create')}
                 onDeletePoll={removePoll}

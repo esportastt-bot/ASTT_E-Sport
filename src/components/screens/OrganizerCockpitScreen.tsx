@@ -13,7 +13,7 @@ import {
   ChevronDown, UserMinus, UserCheck, Shield, ArrowLeft,
   Sparkles, Loader2, X, Users, Calendar, Ban, Trash2,
   Plus, Settings, Copy, Check, Lock, Eye, Pencil, RotateCcw,
-  Split
+  Split, Send
 } from 'lucide-react';
 import { UserAvatar } from '../UserAvatar';
 import { formatFRDateTime, formatShortFRDate } from '../../utils/dateUtils';
@@ -23,6 +23,11 @@ import {
   splitIntoBalancedTeams,
   type ScheduleOptimizationResult,
 } from '../../utils/planningOptimizer';
+import {
+  notifyPlanningDecisionByDiscord,
+  notifyPollRemindersByDiscord,
+  type DiscordNotifyResult,
+} from '../../firebase/discordNotifications';
 
 interface OrganizerCockpitScreenProps {
   polls: Poll[];
@@ -189,6 +194,17 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
   const [copiedType, setCopiedType] = useState<'discord' | 'reminders' | null>(null);
 
+  // Modales MP Discord (Planning décidé & Relance retardataires)
+  const [showPlanningDmModal, setShowPlanningDmModal] = useState(false);
+  const [sendingPlanningDm, setSendingPlanningDm] = useState(false);
+  const [planningDmResult, setPlanningDmResult] = useState<DiscordNotifyResult | null>(null);
+  const [planningDmError, setPlanningDmError] = useState<string | null>(null);
+
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [sendingReminderDm, setSendingReminderDm] = useState(false);
+  const [reminderDmResult, setReminderDmResult] = useState<DiscordNotifyResult | null>(null);
+  const [reminderDmError, setReminderDmError] = useState<string | null>(null);
+
   const dirtySlotIds = useMemo(() => {
     if (!poll) return [];
     return Object.keys(draftsBySlot).filter((sid) =>
@@ -335,6 +351,13 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     (id) => !respondedUserIds.has(id)
   );
 
+  // Destinataires du planning : UNIQUEMENT ceux ayant répondu Présent ou Indéterminé sur >= 1 créneau
+  const presentUserSet = new Set<string>(poll.slots.flatMap((s) => s.disponibles));
+  const uncertainUserSet = new Set<string>(poll.slots.flatMap((s) => s.incertains));
+  const presentOrUncertainIds = Array.from(
+    new Set<string>([...presentUserSet, ...uncertainUserSet])
+  ).sort((a, b) => getUserInfo(a).name.localeCompare(getUserInfo(b).name, 'fr'));
+
   const activeSlots = resolvedSlots.filter((s) => !s.cancelled);
   const cancelledSlotsCount = resolvedSlots.length - activeSlots.length;
   const viableSlotsCount = activeSlots.filter(
@@ -371,6 +394,12 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     setOptimizationBanner(null);
     setExpandedSlotId(null);
     setPendingPollSwitchId(null);
+    setShowPlanningDmModal(false);
+    setPlanningDmResult(null);
+    setPlanningDmError(null);
+    setShowReminderModal(false);
+    setReminderDmResult(null);
+    setReminderDmError(null);
     onDirtyChange?.(false);
     onSelectPollId(targetId);
   };
@@ -537,13 +566,15 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }
   };
 
-  const handleSaveAllDrafts = async () => {
-    if (!canEdit || dirtySlotIds.length === 0 || savingAll) return;
+  const saveAllDrafts = async (): Promise<boolean> => {
+    if (!canEdit) return true;
+    if (dirtySlotIds.length === 0) return true;
+    if (savingAll) return false;
     for (const sid of dirtySlotIds) {
       const d = draftsBySlot[sid];
       if (d.minParticipants > d.maxParticipants) {
         setActionError('Un créneau modifié a un minimum supérieur à son maximum.');
-        return;
+        return false;
       }
     }
     setSavingAll(true);
@@ -563,10 +594,53 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       setOptimizationBanner(null);
       onDirtyChange?.(false);
       showToast(`Planning enregistré (${updates.length} créneau(x) mis à jour) !`);
+      return true;
     } catch (err: any) {
       setActionError(err?.message || "Impossible d'enregistrer le planning.");
+      return false;
     } finally {
       setSavingAll(false);
+    }
+  };
+
+  const handleSaveAllDrafts = () => {
+    void saveAllDrafts();
+  };
+
+  const handleConfirmSendPlanningDm = async () => {
+    if (!canEdit || sendingPlanningDm || presentOrUncertainIds.length === 0) return;
+    setPlanningDmError(null);
+    setPlanningDmResult(null);
+    if (dirtySlotIds.length > 0) {
+      const saved = await saveAllDrafts();
+      if (!saved) {
+        setPlanningDmError("Impossible d'enregistrer vos modifications avant l'envoi.");
+        return;
+      }
+    }
+    setSendingPlanningDm(true);
+    try {
+      const res = await notifyPlanningDecisionByDiscord(poll.id, presentOrUncertainIds);
+      setPlanningDmResult(res);
+    } catch (err: any) {
+      setPlanningDmError(err?.message || "Impossible d'envoyer les MP Discord.");
+    } finally {
+      setSendingPlanningDm(false);
+    }
+  };
+
+  const handleConfirmSendReminderDm = async () => {
+    if (!canEdit || sendingReminderDm || missingResponders.length === 0) return;
+    setReminderDmError(null);
+    setReminderDmResult(null);
+    setSendingReminderDm(true);
+    try {
+      const res = await notifyPollRemindersByDiscord(poll.id, missingResponders);
+      setReminderDmResult(res);
+    } catch (err: any) {
+      setReminderDmError(err?.message || "Impossible d'envoyer la relance en MP Discord.");
+    } finally {
+      setSendingReminderDm(false);
     }
   };
 
@@ -1005,22 +1079,53 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
             <span>{copiedType === 'discord' ? 'Planning copié !' : 'Copier le planning Discord'}</span>
           </button>
 
-          {canEdit && missingResponders.length > 0 && (
+          {canEdit && (
             <button
               type="button"
-              onClick={handleCopyReminders}
-              className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
+              disabled={presentOrUncertainIds.length === 0}
+              onClick={() => {
+                setPlanningDmResult(null);
+                setPlanningDmError(null);
+                setShowPlanningDmModal(true);
+              }}
+              title={
+                presentOrUncertainIds.length === 0
+                  ? 'Aucun membre n’a encore répondu Présent ou Indéterminé'
+                  : `Envoyer le détail du planning en MP Discord à ${presentOrUncertainIds.length} membre(s)`
+              }
+              className="min-h-[40px] bg-sky-600/20 hover:bg-sky-600/30 disabled:opacity-45 disabled:cursor-not-allowed text-sky-200 text-xs font-semibold px-3 py-2 rounded-xl border border-sky-500/40 flex items-center gap-1.5 transition active:scale-95"
             >
-              {copiedType === 'reminders' ? (
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-              ) : (
-                <Copy className="w-3.5 h-3.5 text-amber-400" />
-              )}
-              <span>
-                {copiedType === 'reminders'
-                  ? 'Mentions copiées !'
-                  : `Relancer retardataires (${missingResponders.length})`}
-              </span>
+              <Send className="w-3.5 h-3.5 text-sky-400" />
+              <span>Envoyer le planning en MP ({presentOrUncertainIds.length})</span>
+            </button>
+          )}
+
+          {canEdit && (
+            <button
+              type="button"
+              disabled={missingResponders.length === 0}
+              onClick={() => {
+                setReminderDmResult(null);
+                setReminderDmError(null);
+                setShowReminderModal(true);
+              }}
+              title={
+                missingResponders.length === 0
+                  ? 'Tous les membres ciblés ont déjà répondu'
+                  : `Relancer les ${missingResponders.length} membre(s) qui n'ont pas encore répondu`
+              }
+              className={`min-h-[40px] text-xs font-medium px-3 py-2 rounded-xl border flex items-center gap-1.5 transition ${
+                missingResponders.length === 0
+                  ? 'bg-slate-900/70 border-slate-800 text-slate-500 cursor-not-allowed'
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700 active:scale-95'
+              }`}
+            >
+              <Send
+                className={`w-3.5 h-3.5 ${
+                  missingResponders.length === 0 ? 'text-slate-600' : 'text-amber-400'
+                }`}
+              />
+              <span>Relancer retardataires ({missingResponders.length})</span>
             </button>
           )}
         </div>
@@ -1967,9 +2072,17 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       {activeTab === 'members' && (
         <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-bold text-white">
-              Suivi individuel et charge sur le mois
-            </h3>
+            <div>
+              <h3 className="text-sm font-bold text-white">
+                Suivi individuel et charge sur le mois
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
+                <Lock className="w-3 h-3 text-indigo-400 shrink-0" />
+                <span>
+                  Visibilité du sondage : uniquement les {poll.targetUsers?.length || 0} membre(s) ciblé(s) (+ Admins).
+                </span>
+              </p>
+            </div>
             <div className="flex flex-wrap gap-1.5 text-xs">
               {[
                 { key: 'all', label: 'Tous' },
@@ -2178,6 +2291,273 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
               >
                 Changer sans enregistrer
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale confirmation : Envoyer le planning en MP Discord (Présent / Indéterminé uniquement) */}
+      {showPlanningDmModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-slate-900 border border-sky-500/40 rounded-2xl p-5 sm:p-6 max-w-lg w-full shadow-2xl space-y-4 animate-modal-pop"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-950/70 border border-sky-700/60 flex items-center justify-center shrink-0">
+                  <Send className="w-5 h-5 text-sky-400" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-base text-white">
+                    Envoyer le planning en MP Discord
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Chaque destinataire recevra sa décision personnalisée + le planning complet.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPlanningDmModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                aria-label="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-sky-950/30 border border-sky-800/50 rounded-xl p-3 text-xs text-sky-100">
+              Seuls les membres ayant répondu <strong>Présent</strong> ou{' '}
+              <strong>Indéterminé</strong> ({presentOrUncertainIds.length}) recevront ce message. Les
+              membres uniquement indisponibles et les non-répondants sont exclus.
+            </div>
+
+            {dirtySlotIds.length > 0 && (
+              <div className="bg-amber-950/40 border border-amber-700/50 rounded-xl p-3 text-xs text-amber-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Vos {dirtySlotIds.length} créneau(x) modifié(s) seront automatiquement enregistrés
+                  avant l&apos;envoi des MP.
+                </span>
+              </div>
+            )}
+
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {presentOrUncertainIds.map((uid) => {
+                const info = getUserInfo(uid);
+                const isPresent = presentUserSet.has(uid);
+                return (
+                  <div
+                    key={uid}
+                    className="flex items-center justify-between gap-2 bg-slate-950/80 border border-slate-800 px-3 py-2 rounded-xl text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
+                      <span className="font-medium text-white truncate">{info.name}</span>
+                    </div>
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${
+                        isPresent
+                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700/50'
+                          : 'bg-amber-950/70 text-amber-300 border-amber-700/50'
+                      }`}
+                    >
+                      {isPresent ? 'Présent' : 'Indéterminé'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {planningDmError && (
+              <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{planningDmError}</span>
+              </div>
+            )}
+
+            {planningDmResult && (
+              <div
+                className={`text-xs rounded-xl p-3 border space-y-1.5 ${
+                  planningDmResult.failedCount > 0
+                    ? 'bg-amber-950/50 border-amber-700/60 text-amber-100'
+                    : 'bg-emerald-950/50 border-emerald-700/60 text-emerald-100'
+                }`}
+              >
+                <p className="font-semibold">
+                  {planningDmResult.sentCount} / {planningDmResult.totalAuthorized} MP Discord
+                  envoyé(s) !
+                </p>
+                {planningDmResult.failed.length > 0 && (
+                  <ul className="list-disc pl-5 text-[11px] space-y-0.5">
+                    {planningDmResult.failed.map((f) => (
+                      <li key={f.discordId}>
+                        {f.displayName} : {f.reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowPlanningDmModal(false)}
+                className="px-4 py-2.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-xl transition"
+              >
+                {planningDmResult ? 'Fermer' : 'Annuler'}
+              </button>
+              {!planningDmResult && (
+                <button
+                  type="button"
+                  disabled={sendingPlanningDm || savingAll || presentOrUncertainIds.length === 0}
+                  onClick={handleConfirmSendPlanningDm}
+                  className="px-4 py-2.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-60 rounded-xl transition flex items-center justify-center gap-1.5 shadow-lg shadow-sky-600/20"
+                >
+                  {sendingPlanningDm || savingAll ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Envoi en cours...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      <span>
+                        {dirtySlotIds.length > 0
+                          ? 'Enregistrer & Envoyer les MP'
+                          : 'Envoyer en MP Discord'}
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale : Relancer les retardataires */}
+      {showReminderModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-slate-900 border border-amber-500/40 rounded-2xl p-5 sm:p-6 max-w-lg w-full shadow-2xl space-y-4 animate-modal-pop"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-950/70 border border-amber-700/60 flex items-center justify-center shrink-0">
+                  <Clock className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-base text-white">
+                    Relancer les retardataires ({missingResponders.length})
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Envoyez un MP individuel avec le lien ou copiez les mentions Discord.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReminderModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                aria-label="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+              {missingResponders.map((uid) => {
+                const info = getUserInfo(uid);
+                return (
+                  <div
+                    key={uid}
+                    className="flex items-center justify-between gap-2 bg-slate-950/80 border border-slate-800 px-3 py-2 rounded-xl text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
+                      <span className="font-medium text-white truncate">{info.name}</span>
+                    </div>
+                    <span className="text-[10px] text-amber-300 bg-amber-950/60 border border-amber-800/50 px-2 py-0.5 rounded-full shrink-0">
+                      En attente
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {reminderDmError && (
+              <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{reminderDmError}</span>
+              </div>
+            )}
+
+            {reminderDmResult && (
+              <div
+                className={`text-xs rounded-xl p-3 border space-y-1.5 ${
+                  reminderDmResult.failedCount > 0
+                    ? 'bg-amber-950/50 border-amber-700/60 text-amber-100'
+                    : 'bg-emerald-950/50 border-emerald-700/60 text-emerald-100'
+                }`}
+              >
+                <p className="font-semibold">
+                  {reminderDmResult.sentCount} / {reminderDmResult.totalAuthorized} MP de relance
+                  envoyé(s) !
+                </p>
+                {reminderDmResult.failed.length > 0 && (
+                  <ul className="list-disc pl-5 text-[11px] space-y-0.5">
+                    {reminderDmResult.failed.map((f) => (
+                      <li key={f.discordId}>
+                        {f.displayName} : {f.reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={handleCopyReminders}
+                className="px-3.5 py-2.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition flex items-center justify-center gap-1.5"
+              >
+                {copiedType === 'reminders' ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5 text-amber-400" />
+                )}
+                <span>
+                  {copiedType === 'reminders' ? 'Mentions copiées !' : 'Copier les mentions (@...)'}
+                </span>
+              </button>
+
+              {!reminderDmResult && (
+                <button
+                  type="button"
+                  disabled={sendingReminderDm || missingResponders.length === 0}
+                  onClick={handleConfirmSendReminderDm}
+                  className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 disabled:opacity-60 rounded-xl transition flex items-center justify-center gap-1.5"
+                >
+                  {sendingReminderDm ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Envoi en cours...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Envoyer une relance en MP Discord</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

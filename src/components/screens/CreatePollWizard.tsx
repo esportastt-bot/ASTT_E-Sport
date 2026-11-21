@@ -1596,6 +1596,14 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 </div>
               </div>
 
+              <div className="bg-indigo-950/35 border border-indigo-700/40 text-indigo-200 text-xs rounded-xl p-3 flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                <span>
+                  Un MP Discord contenant le lien direct du sondage sera automatiquement envoyé aux{' '}
+                  <strong>{selectedMembersList.length} membre(s) concerné(s)</strong> dès la publication.
+                </span>
+              </div>
+
               {publishError && (
                 <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
@@ -1647,7 +1655,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               {isPublishing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Publication...</span>
+                  <span>Publication & envoi MP...</span>
                 </>
               ) : (
                 <>
