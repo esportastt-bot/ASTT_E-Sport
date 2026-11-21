@@ -25,28 +25,30 @@ const PollsContext = createContext<PollsContextType>({
 });
 
 export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { userProfile } = useAuth();
+  const { firebaseUser, userProfile } = useAuth();
   const [polls, setPolls] = useState<Poll[]>(() => {
     const saved = localStorage.getItem('astt_polls_cache');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       } catch {
         return [MOCK_POLL];
       }
     }
     return [MOCK_POLL];
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // Sauvegarder dans le cache local
   useEffect(() => {
     localStorage.setItem('astt_polls_cache', JSON.stringify(polls));
   }, [polls]);
 
-  // Synchronisation Firestore en temps réel si configuré
+  // Synchronisation Firestore en temps réel dès que l'utilisateur est connecté
   useEffect(() => {
-    if (!import.meta.env.VITE_FIREBASE_API_KEY) {
+    // Si pas d'utilisateur Firebase connecté, on reste sur les données locales sans bloquer l'UI
+    if (!firebaseUser) {
       setLoading(false);
       return;
     }
@@ -63,7 +65,7 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.warn('Mode hors-ligne ou Firestore non connecté:', e);
       setLoading(false);
     }
-  }, []);
+  }, [firebaseUser]);
 
   const createNewPoll = async (pollData: any, slots: any[]): Promise<string> => {
     const newId = `poll-${Date.now()}`;

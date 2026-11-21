@@ -89,30 +89,42 @@ export function subscribeToPollsList(
     orderBy('created_at', 'desc')
   );
 
-  return onSnapshot(q, async (snapshot) => {
-    const polls: Poll[] = [];
-    for (const docSnap of snapshot.docs) {
-      const poll = docToPoll(docSnap.id, docSnap.data());
-      // Charger les créneaux
-      const slotsSnap = await getDocs(
-        query(collection(db, POLLS_COL, docSnap.id, 'slots'), orderBy('date_str'), orderBy('start_time'))
-      );
-      poll.slots = slotsSnap.docs.map(s => ({
-        id: s.id,
-        dateStr: s.data().date_str,
-        dayName: s.data().day_name,
-        startTime: s.data().start_time,
-        endTime: s.data().end_time,
-        disponibles: [],
-        incertains: [],
-        indisponibles: [],
-        selectedIds: s.data().selected_user_ids || [],
-        waitlistIds: s.data().waitlist_user_ids || [],
-      }));
-      polls.push(poll);
+  return onSnapshot(
+    q,
+    async (snapshot) => {
+      try {
+        const polls: Poll[] = [];
+        for (const docSnap of snapshot.docs) {
+          const poll = docToPoll(docSnap.id, docSnap.data());
+          // Charger les créneaux
+          const slotsSnap = await getDocs(
+            query(collection(db, POLLS_COL, docSnap.id, 'slots'), orderBy('date_str'), orderBy('start_time'))
+          );
+          poll.slots = slotsSnap.docs.map(s => ({
+            id: s.id,
+            dateStr: s.data().date_str,
+            dayName: s.data().day_name,
+            startTime: s.data().start_time,
+            endTime: s.data().end_time,
+            disponibles: [],
+            incertains: [],
+            indisponibles: [],
+            selectedIds: s.data().selected_user_ids || [],
+            waitlistIds: s.data().waitlist_user_ids || [],
+          }));
+          polls.push(poll);
+        }
+        callback(polls);
+      } catch (err) {
+        console.warn('Erreur traitement documents Firestore:', err);
+        callback([]);
+      }
+    },
+    (err) => {
+      console.warn('Firestore snapshot non autorisé ou hors-ligne:', err.message);
+      callback([]);
     }
-    callback(polls);
-  });
+  );
 }
 
 /** Écoute en temps réel les réponses d'un sondage */
