@@ -1,0 +1,13 @@
+name = "astt-auth"
+main = "src/index.ts"
+compatibility_date = "2024-11-14"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+FIREBASE_PROJECT_ID = "astt-sondages-app"
+DISCORD_GUILD_ID = ""
+FRONTEND_URL = "https://esportastt-bot.github.io/ASTT_E-Sport"
+
+# Cron trigger : réconciliation et clôture toutes les 5 minutes
+[triggers]
+crons = ["*/5 * * * *"]

@@ -1,11 +1,23 @@
 import React from 'react';
 import { MessageSquare, Link2, ShieldCheck, Smartphone } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface LoginScreenProps {
   onLogin: (asCaptain: boolean) => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
+  const { loginWithDiscord } = useAuth();
+
+  const handleDiscordClick = () => {
+    if (import.meta.env.VITE_DISCORD_CLIENT_ID) {
+      loginWithDiscord();
+    } else {
+      // Si pas encore configuré dans .env, simuler connexion capitaine
+      onLogin(true);
+    }
+  };
+
   return (
     <div className="min-h-[80vh] flex flex-col items-center justify-center px-4 py-8">
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
@@ -24,7 +36,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         {/* Discord OAuth2 Button */}
         <div className="space-y-3 pt-2">
           <button
-            onClick={() => onLogin(true)}
+            onClick={handleDiscordClick}
             className="w-full flex items-center justify-center gap-3 bg-[#5865F2] hover:bg-[#4752c4] text-white py-3.5 px-4 rounded-xl font-medium transition shadow-lg shadow-[#5865F2]/20 active:scale-[0.99]"
           >
             <MessageSquare className="w-5 h-5 fill-current" />

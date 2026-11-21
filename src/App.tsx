@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { MOCK_USERS, MOCK_POLL } from './mock/data';
-import type { UserProfile, Poll, ResponseStatus } from './types';
+import { useAuth } from './contexts/AuthContext';
+import { usePolls } from './contexts/PollsContext';
+import type { ResponseStatus } from './types';
 import { Navbar } from './components/Navbar';
 import { LoginScreen } from './components/screens/LoginScreen';
 import { DashboardScreen } from './components/screens/DashboardScreen';
@@ -10,73 +11,50 @@ import { ResultsScreen } from './components/screens/ResultsScreen';
 import bgFond from './assets/fond.webp';
 
 export function App() {
-  const [currentUser, setCurrentUser] = useState<UserProfile>(MOCK_USERS[0]); // Alex (Capitaine) by default
+  const { userProfile, loginAsDemoUser } = useAuth();
+  const { polls, loading, createNewPoll, removePoll, cancelExistingPoll, saveVotes } = usePolls();
   const [currentScreen, setCurrentScreen] = useState<'login' | 'dashboard' | 'create' | 'vote' | 'results' | 'profile'>('dashboard');
-  const [polls, setPolls] = useState<Poll[]>([MOCK_POLL]);
+  const [selectedPollId, setSelectedPollId] = useState<string | null>(null);
+
+  // Poll sélectionné pour voter ou voir les résultats
+  const activePoll = polls.find(p => p.id === selectedPollId) || polls[0] || null;
 
   const toggleUserRole = () => {
-    // Switch between Alex (Capitaine) and Thomas (Membre)
-    if (currentUser.role === 'CAPTAIN') {
-      setCurrentUser(MOCK_USERS[1]); // Thomas
-    } else {
-      setCurrentUser(MOCK_USERS[0]); // Alex
+    if (!userProfile) {
+      loginAsDemoUser(true);
+      return;
     }
+    loginAsDemoUser(userProfile.role !== 'CAPTAIN');
   };
 
   const handleLogin = (asCaptain: boolean) => {
-    setCurrentUser(asCaptain ? MOCK_USERS[0] : MOCK_USERS[1]);
+    loginAsDemoUser(asCaptain);
     setCurrentScreen('dashboard');
   };
 
-  const handleSelectPoll = (_pollId: string, action: 'vote' | 'results' | 'edit') => {
+  const handleSelectPoll = (pollId: string, action: 'vote' | 'results' | 'edit') => {
+    setSelectedPollId(pollId);
     if (action === 'vote') setCurrentScreen('vote');
     else if (action === 'results') setCurrentScreen('results');
     else if (action === 'edit') setCurrentScreen('create');
   };
 
-  const handleCreatePollPublish = (pollData: any) => {
-    // Create new mock poll
-    const newPoll: Poll = {
-      ...MOCK_POLL,
-      id: `poll-${Date.now()}`,
-      title: pollData.title,
-      type: pollData.trainingType,
-      startDate: pollData.startDate,
-      endDate: pollData.endDate,
-      deadline: pollData.deadline,
-      minParticipants: pollData.minParticipants,
-      maxParticipants: pollData.maxParticipants,
-      slots: pollData.slots,
-    };
-    setPolls([newPoll, ...polls]);
+  const handleCreatePollPublish = async (pollData: any) => {
+    await createNewPoll(pollData, pollData.slots || []);
     setCurrentScreen('dashboard');
   };
 
-  const handleSaveVotes = (votes: Record<string, ResponseStatus>) => {
-    // Update local poll votes
-    setPolls((prev) =>
-      prev.map((poll) => {
-        if (poll.id !== MOCK_POLL.id) return poll;
-        const updatedSlots = poll.slots.map((slot) => {
-          const vote = votes[slot.id];
-          const newDispo = slot.disponibles.filter((id) => id !== currentUser.id);
-          const newIncertain = slot.incertains.filter((id) => id !== currentUser.id);
-          const newIndispo = slot.indisponibles.filter((id) => id !== currentUser.id);
+  const handleSaveVotes = async (votes: Record<string, ResponseStatus>) => {
+    if (!activePoll) return;
+    await saveVotes(activePoll.id, votes);
+  };
 
-          if (vote === 'DISPONIBLE') newDispo.push(currentUser.id);
-          else if (vote === 'INCERTAIN') newIncertain.push(currentUser.id);
-          else if (vote === 'INDISPONIBLE') newIndispo.push(currentUser.id);
-
-          return {
-            ...slot,
-            disponibles: newDispo,
-            incertains: newIncertain,
-            indisponibles: newIndispo,
-          };
-        });
-        return { ...poll, slots: updatedSlots };
-      })
-    );
+  const currentUser = userProfile || {
+    id: 'usr_guest',
+    name: 'Visiteur',
+    avatar: '👤',
+    role: 'MEMBER' as const,
+    discordRoles: [],
   };
 
   return (
@@ -108,8 +86,11 @@ export function App() {
           <DashboardScreen
             currentUser={currentUser}
             polls={polls}
+            loading={loading}
             onSelectPoll={handleSelectPoll}
             onCreatePoll={() => setCurrentScreen('create')}
+            onDeletePoll={removePoll}
+            onCancelPoll={cancelExistingPoll}
           />
         )}
 
@@ -120,17 +101,17 @@ export function App() {
           />
         )}
 
-        {currentScreen === 'vote' && (
+        {currentScreen === 'vote' && activePoll && (
           <MemberVoteScreen
-            poll={polls[0]}
+            poll={activePoll}
             currentUser={currentUser}
             onSaveVotes={handleSaveVotes}
           />
         )}
 
-        {currentScreen === 'results' && (
+        {currentScreen === 'results' && activePoll && (
           <ResultsScreen
-            poll={polls[0]}
+            poll={activePoll}
             currentUser={currentUser}
           />
         )}
