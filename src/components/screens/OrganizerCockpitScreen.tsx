@@ -8,10 +8,10 @@ import {
 import type { MemberProfile } from '../../firebase/members';
 import {
   Trophy, AlertTriangle, CheckCircle, Clock,
-  ChevronDown, ChevronUp, UserMinus, UserCheck, Shield, ArrowLeft,
+  ChevronDown, UserMinus, UserCheck, Shield, ArrowLeft,
   Sparkles, Loader2, X, Users, Calendar, Ban, Trash2,
   Plus, Settings, Copy, Check, Lock, Eye, Pencil, RotateCcw,
-  Split, HelpCircle, ChevronsDownUp, ChevronsUpDown
+  Split
 } from 'lucide-react';
 import { UserAvatar } from '../UserAvatar';
 import { formatFRDateTime, formatShortFRDate } from '../../utils/dateUtils';
@@ -141,8 +141,11 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     'all' | 'responded' | 'missing' | 'unfulfilled'
   >('all');
 
-  // Tous les jours/créneaux repliés par défaut (Set vide)
-  const [expandedSlotIds, setExpandedSlotIds] = useState<Set<string>>(() => new Set());
+  // Accordéon strict : 1 seul créneau déplié à la fois, tous repliés par défaut
+  const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
+  const [voteTabBySlot, setVoteTabBySlot] = useState<
+    Record<string, 'dispo' | 'incertain' | 'indispo'>
+  >({});
 
   // Brouillons par créneau
   const [draftsBySlot, setDraftsBySlot] = useState<Record<string, SlotDraft>>({});
@@ -257,7 +260,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
   const canEdit = currentUser.isAdmin || poll.createdBy === currentUser.id;
 
-  // Fusion temps réel Firestore + brouillons locaux
   const resolvedSlots = poll.slots.map((slot) => {
     const draft = draftsBySlot[slot.id];
     const slotMin = draft?.minParticipants ?? slot.minParticipants ?? poll.minParticipants;
@@ -348,30 +350,15 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }, 3500);
   };
 
+  // Accordéon exclusif : ouvrir un créneau ferme automatiquement le précédent
   const toggleSlotExpanded = (slotId: string) => {
-    setExpandedSlotIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(slotId)) next.delete(slotId);
-      else next.add(slotId);
-      return next;
-    });
-  };
-
-  const areAllExpanded =
-    orderedSlots.length > 0 && orderedSlots.every((s) => expandedSlotIds.has(s.id));
-
-  const toggleExpandAll = () => {
-    if (areAllExpanded) {
-      setExpandedSlotIds(new Set());
-    } else {
-      setExpandedSlotIds(new Set(orderedSlots.map((s) => s.id)));
-    }
+    setExpandedSlotId((prev) => (prev === slotId ? null : slotId));
   };
 
   const switchPollNow = (targetId: string) => {
     setDraftsBySlot({});
     setOptimizationBanner(null);
-    setExpandedSlotIds(new Set());
+    setExpandedSlotId(null);
     setPendingPollSwitchId(null);
     onDirtyChange?.(false);
     onSelectPollId(targetId);
@@ -587,6 +574,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     try {
       await onRemoveSlot(poll.id, slotId);
       setConfirmDeleteSlotId(null);
+      if (expandedSlotId === slotId) setExpandedSlotId(null);
       setDraftsBySlot((prev) => {
         const copy = { ...prev };
         delete copy[slotId];
@@ -767,14 +755,14 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     const desired = poll.desiredGamesByUser?.[uid];
     if (desired === undefined) {
       return (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/90 text-slate-400 shrink-0">
           {assigned}/?
         </span>
       );
     }
     if (desired === null) {
       return (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300">
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/90 text-indigo-300 shrink-0">
           {assigned}/∞
         </span>
       );
@@ -783,7 +771,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     const met = assigned === desired && desired > 0;
     return (
       <span
-        className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+        className={`text-[10px] px-1.5 py-0.5 rounded border font-mono shrink-0 ${
           over
             ? 'bg-amber-950/70 text-amber-300 border-amber-700/60'
             : met
@@ -798,25 +786,25 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   };
 
   return (
-    <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5 sm:space-y-6">
 
       {/* Top Navigation & Sélecteur de sondage */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {onBack && (
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition group self-start"
+            className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition group self-start"
           >
             <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition" />
             <span>Retour à l'accueil</span>
           </button>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col xs:flex-row sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
           <select
             value={poll.id}
             onChange={(e) => handlePollSelectChange(e.target.value)}
-            className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-white focus:outline-none focus:border-indigo-500 max-w-full sm:max-w-md"
+            className="w-full sm:w-auto sm:max-w-md bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-white focus:outline-none focus:border-indigo-500"
           >
             {polls.map((p) => (
               <option key={p.id} value={p.id}>
@@ -827,12 +815,12 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
           </select>
 
           {canEdit ? (
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-xl bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            <span className="inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-xl bg-amber-500/15 text-amber-300 border border-amber-500/30 self-start sm:self-auto shrink-0">
               <Pencil className="w-3 h-3" />
               Mode Édition ({currentUser.isAdmin ? 'Admin' : 'Organisateur'})
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 border border-slate-700">
+            <span className="inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 self-start sm:self-auto shrink-0">
               <Eye className="w-3 h-3 text-indigo-400" />
               Lecture seule
             </span>
@@ -841,7 +829,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       </div>
 
       {/* Header Sondage + KPIs */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5">
+      <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -852,13 +840,13 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                 Créé par <strong className="text-slate-200">{poll.createdByName || 'Organisateur'}</strong>
               </span>
             </div>
-            <h2 className="text-xl font-bold text-white">{poll.title}</h2>
+            <h2 className="text-lg sm:text-xl font-bold text-white leading-snug">{poll.title}</h2>
           </div>
 
           <div className="text-xs text-slate-400 space-y-1 sm:text-right">
             <p className="flex items-center sm:justify-end gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-amber-400" />
-              Clôture : {formatFRDateTime(poll.deadline)}
+              <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>Clôture : {formatFRDateTime(poll.deadline)}</span>
             </p>
             <p>
               Défaut : Min <strong className="text-white">{poll.minParticipants}</strong> | Max{' '}
@@ -868,7 +856,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         </div>
 
         {/* 4 Cartes KPIs */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
           <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 space-y-1">
             <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5 text-indigo-400" />
@@ -879,7 +867,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
             </p>
             <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
               <div
-                className="h-full bg-indigo-500 transition-all"
+                className="h-full bg-indigo-500 transition-all duration-500"
                 style={{
                   width: `${targetCount > 0 ? Math.min(100, Math.round((respondedTargetCount / targetCount) * 100)) : 0}%`,
                 }}
@@ -928,7 +916,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
               <button
                 type="button"
                 onClick={handleRunOptimizer}
-                className="bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/20"
+                className="w-full sm:w-auto min-h-[40px] bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-600/20"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Proposer une configuration optimale</span>
@@ -943,7 +931,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                   setNewSlotMin(poll.minParticipants);
                   setNewSlotMax(poll.maxParticipants);
                 }}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
+                className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
               >
                 <Plus className="w-3.5 h-3.5 text-indigo-400" />
                 <span>Ajouter un créneau</span>
@@ -952,7 +940,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
               <button
                 type="button"
                 onClick={openSettingsPanel}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
+                className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
               >
                 <Settings className="w-3.5 h-3.5 text-slate-300" />
                 <span>Paramètres</span>
@@ -964,7 +952,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
             type="button"
             onClick={handleCopyDiscordSummary}
             title="Copie un résumé prêt à coller (Ctrl+V) dans un salon Discord avec les créneaux, titulaires et équipes"
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
+            className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
           >
             {copiedType === 'discord' ? (
               <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -978,7 +966,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
             <button
               type="button"
               onClick={handleCopyReminders}
-              className="bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
+              className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
             >
               {copiedType === 'reminders' ? (
                 <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -998,7 +986,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         {canEdit && showAddSlotForm && (
           <form
             onSubmit={handleCreateExtraSlot}
-            className="bg-slate-950 border border-indigo-500/30 rounded-xl p-4 flex flex-wrap items-end gap-3 text-xs"
+            className="bg-slate-950 border border-indigo-500/30 rounded-xl p-4 flex flex-wrap items-end gap-3 text-xs animate-fade-slide-up"
           >
             <div className="space-y-1">
               <label className="text-slate-400 block">Date</label>
@@ -1067,7 +1055,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         {canEdit && showQuickSettings && (
           <form
             onSubmit={handleSaveQuickSettings}
-            className="bg-slate-950 border border-slate-700 rounded-xl p-4 space-y-3 text-xs"
+            className="bg-slate-950 border border-slate-700 rounded-xl p-4 space-y-3 text-xs animate-fade-slide-up"
           >
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="space-y-1">
@@ -1147,9 +1135,9 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
         )}
       </div>
 
-      {/* Feedbacks & Alerte Modifications non sauvegardées */}
+      {/* Feedbacks d'erreur réseau ou confirmation de sauvegarde */}
       {actionError && (
-        <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center justify-between gap-2">
+        <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center justify-between gap-2 animate-fade-slide-up">
           <span className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
             {actionError}
@@ -1161,26 +1149,23 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
       )}
 
       {savedFeedback && (
-        <div className="bg-emerald-950/60 border border-emerald-700/60 text-emerald-200 text-xs rounded-xl p-3 flex items-center gap-2">
+        <div className="bg-emerald-950/60 border border-emerald-700/60 text-emerald-200 text-xs rounded-xl p-3 flex items-center gap-2 animate-fade-slide-up">
           <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{savedFeedback}</span>
         </div>
       )}
 
-      {canEdit && (dirtySlotIds.length > 0 || optimizationBanner) && (
-        <div
-          role="alert"
-          className="bg-red-950/75 border-2 border-red-500/70 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg"
-        >
+      {/* Bandeau informatif calme pour la proposition optimale */}
+      {canEdit && optimizationBanner && (
+        <div className="bg-indigo-950/75 border border-indigo-500/40 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg animate-fade-slide-up">
           <div className="space-y-1 text-xs">
-            <p className="font-bold text-white flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              {optimizationBanner
-                ? `Modifications non sauvegardées (proposition optimale) : ${optimizationBanner.plannedSessionsCount} séance(s) planifiée(s), ${optimizationBanner.satisfiedPlayersCount}/${optimizationBanner.totalRequestingPlayers} souhait(s) couvert(s).`
-                : `Modifications non sauvegardées sur ${dirtySlotIds.length} créneau(x) ! Cliquez sur « Enregistrer tout le planning » pour ne rien perdre.`}
+            <p className="font-semibold text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+              Proposition optimale prête : {optimizationBanner.plannedSessionsCount} séance(s) planifiée(s),{' '}
+              {optimizationBanner.satisfiedPlayersCount}/{optimizationBanner.totalRequestingPlayers} souhait(s) couvert(s).
             </p>
-            {optimizationBanner && optimizationBanner.unfulfilledPlayers.length > 0 && (
-              <p className="text-amber-200 text-[11px]">
+            {optimizationBanner.unfulfilledPlayers.length > 0 && (
+              <p className="text-slate-300 text-[11px]">
                 Objectif partiel pour :{' '}
                 {optimizationBanner.unfulfilledPlayers
                   .map((u) => `${getUserInfo(u.userId).name} (${u.assigned}/${u.desired})`)
@@ -1198,28 +1183,26 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
             >
               Annuler
             </button>
-            {dirtySlotIds.length > 0 && (
-              <button
-                type="button"
-                onClick={handleSaveAllDrafts}
-                disabled={savingAll}
-                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition flex items-center gap-1.5 shadow"
-              >
-                {savingAll && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>Enregistrer tout le planning</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleSaveAllDrafts}
+              disabled={savingAll}
+              className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition flex items-center gap-1.5 shadow"
+            >
+              {savingAll && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>Enregistrer le planning</span>
+            </button>
           </div>
         </div>
       )}
 
-      {/* Onglets Cockpit & Contrôles d'affichage */}
+      {/* Onglets Cockpit & Tri */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+        <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1 rounded-xl w-full sm:w-auto">
           <button
             type="button"
             onClick={() => setActiveTab('planning')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
+            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
               activeTab === 'planning'
                 ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-white'
@@ -1230,67 +1213,45 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('members')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
+            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
               activeTab === 'members'
                 ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Suivi des membres & Parties ({allRelevantUserIds.length})
+            Suivi membres ({allRelevantUserIds.length})
           </button>
         </div>
 
         {activeTab === 'planning' && (
-          <div className="flex flex-wrap items-center gap-2">
-            {orderedSlots.length > 0 && (
-              <button
-                type="button"
-                onClick={toggleExpandAll}
-                className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition"
-              >
-                {areAllExpanded ? (
-                  <>
-                    <ChevronsDownUp className="w-3.5 h-3.5" />
-                    <span>Tout replier</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronsUpDown className="w-3.5 h-3.5" />
-                    <span>Tout déplier</span>
-                  </>
-                )}
-              </button>
-            )}
-
-            <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl text-xs">
-              <button
-                type="button"
-                onClick={() => setSortMode('rank')}
-                className={`px-2.5 py-1 rounded-lg transition ${
-                  sortMode === 'rank' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400'
-                }`}
-              >
-                Par classement
-              </button>
-              <button
-                type="button"
-                onClick={() => setSortMode('date')}
-                className={`px-2.5 py-1 rounded-lg transition ${
-                  sortMode === 'date' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400'
-                }`}
-              >
-                Par date
-              </button>
-            </div>
+          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl text-xs ml-auto">
+            <button
+              type="button"
+              onClick={() => setSortMode('rank')}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                sortMode === 'rank' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400'
+              }`}
+            >
+              Par classement
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortMode('date')}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                sortMode === 'date' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400'
+              }`}
+            >
+              Par date
+            </button>
           </div>
         )}
       </div>
 
-      {/* TAB 1: PLANNING & ÉQUIPES */}
+      {/* TAB 1: PLANNING & ÉQUIPES (ACCORDÉON EXCLUSIF + CELLULE ÉPURÉE EN 3 ZONES) */}
       {activeTab === 'planning' && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {orderedSlots.map((slot, index) => {
-            const isExpanded = expandedSlotIds.has(slot.id);
+            const isExpanded = expandedSlotId === slot.id;
             const isCancelled = Boolean(slot.cancelled);
             const slotMin = slot.minParticipants;
             const slotMax = slot.maxParticipants;
@@ -1310,15 +1271,25 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
             const isDirty = Boolean(draftsBySlot[slot.id]);
             const isSavingThis = savingSlotId === slot.id;
+            const activeVoteTab = voteTabBySlot[slot.id] || 'dispo';
+
+            const fillPct =
+              slotMax > 0 ? Math.min(100, Math.round((slot.selectedIds.length / slotMax) * 100)) : 0;
+            const fillColor =
+              slot.selectedIds.length > slotMax
+                ? 'bg-amber-500'
+                : slot.selectedIds.length >= slotMin
+                ? 'bg-emerald-500'
+                : 'bg-indigo-500';
 
             return (
               <div
                 key={slot.id}
-                className={`bg-slate-900 border rounded-2xl overflow-hidden shadow-lg transition ${
+                className={`bg-slate-900/95 border rounded-2xl overflow-hidden shadow-lg transition duration-200 ${
                   isCancelled
                     ? 'border-red-900/50 opacity-75'
-                    : isDirty
-                    ? 'border-red-500/70'
+                    : isExpanded
+                    ? 'border-indigo-500/60 ring-1 ring-indigo-500/20'
                     : isExceeded
                     ? 'border-amber-500/40'
                     : isMinReached
@@ -1326,12 +1297,14 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                     : 'border-slate-800'
                 }`}
               >
-                {/* Summary Bar */}
-                <div
+                {/* En-tête accordéon cliquable */}
+                <button
+                  type="button"
                   onClick={() => toggleSlotExpanded(slot.id)}
-                  className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:bg-slate-800/40 transition select-none"
+                  aria-expanded={isExpanded}
+                  className="w-full text-left p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:bg-slate-800/40 transition select-none"
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div
                       className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
                         isCancelled
@@ -1348,8 +1321,8 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                       {isCancelled ? <Ban className="w-4 h-4" /> : `#${index + 1}`}
                     </div>
 
-                    <div>
-                      <h3 className="font-bold text-sm text-white flex flex-wrap items-center gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm text-white flex flex-wrap items-center gap-1.5 sm:gap-2">
                         <span className={isCancelled ? 'line-through text-slate-400' : ''}>
                           {slot.dayName} {formatShortFRDate(slot.dateStr)}
                         </span>
@@ -1364,23 +1337,18 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                             {slot.selectedIds.length} titulaire(s)
                           </span>
                         )}
-                        {isDirty && (
-                          <span className="text-[10px] bg-red-950 text-red-300 border border-red-700/60 px-2 py-0.5 rounded-full">
-                            Non sauvegardé
-                          </span>
-                        )}
-                      </h3>
+                      </div>
                       <p className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
-                        <span>{nbDispo} disponible(s)</span>
+                        <span>{nbDispo} dispo</span>
                         <span>•</span>
-                        <span>{nbIncertain} incertain(s)</span>
+                        <span>{nbIncertain} incertain</span>
                         <span>•</span>
-                        <span>{nbIndispo} indisponible(s)</span>
+                        <span>{nbIndispo} indispo</span>
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-3">
+                  <div className="flex items-center justify-between sm:justify-end gap-3 pl-11 sm:pl-0">
                     {isCancelled ? (
                       <span className="bg-red-950/70 border border-red-800/60 text-red-300 text-xs px-2.5 py-1 rounded-xl font-medium">
                         Annulé — {slot.cancelReason || 'Indisponible'}
@@ -1401,455 +1369,521 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                       </span>
                     )}
 
-                    <div className="text-slate-400 hover:text-white p-1">
-                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </div>
+                    <ChevronDown
+                      className={`w-4 h-4 text-slate-400 transition-transform duration-300 shrink-0 ${
+                        isExpanded ? 'rotate-180 text-indigo-300' : ''
+                      }`}
+                    />
                   </div>
-                </div>
+                </button>
 
-                {/* Expanded Panel */}
-                {isExpanded && (
-                  <div className="border-t border-slate-800 bg-slate-950/70 p-4 sm:p-5 space-y-4">
+                {/* Corps accordéon animé (3 zones épurées) */}
+                <div className="accordion-content" data-open={isExpanded ? 'true' : 'false'}>
+                  <div className="accordion-inner">
+                    <div className="border-t border-slate-800 bg-slate-950/70 p-3.5 sm:p-5 space-y-4">
 
-                    {/* Barre d'actions créneau (Organisateur / Admin uniquement) */}
-                    {canEdit && (
-                      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
-                            <label className="flex items-center gap-1 text-slate-300">
-                              <span className="text-slate-400">Min</span>
-                              <input
-                                type="number"
-                                min={2}
-                                max={20}
-                                value={slotMin}
-                                onChange={(e) =>
-                                  updateSlotMinMaxDraft(
-                                    slot.id,
-                                    'minParticipants',
-                                    parseInt(e.target.value, 10) || 2
-                                  )
-                                }
-                                className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
-                              />
-                            </label>
-                            <label className="flex items-center gap-1 text-slate-300">
-                              <span className="text-slate-400">Max</span>
-                              <input
-                                type="number"
-                                min={2}
-                                max={20}
-                                value={slotMax}
-                                onChange={(e) =>
-                                  updateSlotMinMaxDraft(
-                                    slot.id,
-                                    'maxParticipants',
-                                    parseInt(e.target.value, 10) || 8
-                                  )
-                                }
-                                className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
-                              />
-                            </label>
+                      {/* ZONE 1 : Barre d'actions compacte du créneau (Organisateur / Admin) */}
+                      {canEdit && (
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
+                              <label className="flex items-center gap-1 text-slate-300">
+                                <span className="text-slate-400">Min</span>
+                                <input
+                                  type="number"
+                                  min={2}
+                                  max={20}
+                                  value={slotMin}
+                                  onChange={(e) =>
+                                    updateSlotMinMaxDraft(
+                                      slot.id,
+                                      'minParticipants',
+                                      parseInt(e.target.value, 10) || 2
+                                    )
+                                  }
+                                  className="w-11 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-center text-white font-mono"
+                                />
+                              </label>
+                              <label className="flex items-center gap-1 text-slate-300">
+                                <span className="text-slate-400">Max</span>
+                                <input
+                                  type="number"
+                                  min={2}
+                                  max={20}
+                                  value={slotMax}
+                                  onChange={(e) =>
+                                    updateSlotMinMaxDraft(
+                                      slot.id,
+                                      'maxParticipants',
+                                      parseInt(e.target.value, 10) || 8
+                                    )
+                                  }
+                                  className="w-11 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-center text-white font-mono"
+                                />
+                              </label>
+                            </div>
+
+                            {slot.selectedIds.length >= 2 && !isCancelled && (
+                              <button
+                                type="button"
+                                onClick={() => applyBalancedTeamsToSlot(slot.id, slot.selectedIds)}
+                                className="text-[11px] bg-slate-800 hover:bg-slate-700 text-indigo-300 px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
+                              >
+                                <Split className="w-3.5 h-3.5" />
+                                <span>Éq. A / B</span>
+                              </button>
+                            )}
                           </div>
 
-                          {slot.selectedIds.length >= 2 && !isCancelled && (
-                            <button
-                              type="button"
-                              onClick={() => applyBalancedTeamsToSlot(slot.id, slot.selectedIds)}
-                              className="text-[11px] bg-slate-800 hover:bg-slate-700 text-indigo-300 px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition"
-                            >
-                              <Split className="w-3.5 h-3.5" />
-                              <span>Répartir Équipe A / B</span>
-                            </button>
-                          )}
-
-                          {isCancelled ? (
-                            <button
-                              type="button"
-                              onClick={() => handleToggleCancelSlot(slot.id, true)}
-                              className="text-[11px] bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 px-2.5 py-1.5 rounded-lg border border-emerald-700/60 flex items-center gap-1.5 transition"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Réactiver ce créneau</span>
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCancellingSlotId((prev) => (prev === slot.id ? null : slot.id))
-                              }
-                              className="text-[11px] bg-slate-800 hover:bg-amber-950/60 text-amber-300 px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition"
-                            >
-                              <Ban className="w-3.5 h-3.5" />
-                              <span>Salle indispo / Annuler</span>
-                            </button>
-                          )}
-                        </div>
-
-                        <div>
-                          {confirmDeleteSlotId === slot.id ? (
-                            <div className="flex items-center gap-1.5 text-[11px]">
-                              <span className="text-red-300">Supprimer ?</span>
+                          <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2">
+                            {isCancelled ? (
                               <button
                                 type="button"
-                                onClick={() => handleConfirmDeleteSlot(slot.id)}
-                                className="bg-red-600 hover:bg-red-500 text-white px-2.5 py-1 rounded-lg font-semibold"
+                                onClick={() => handleToggleCancelSlot(slot.id, true)}
+                                className="text-[11px] bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 px-2.5 py-1.5 rounded-lg border border-emerald-700/60 flex items-center gap-1.5 transition active:scale-95"
                               >
-                                Oui
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Réactiver</span>
                               </button>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() => setConfirmDeleteSlotId(null)}
-                                className="bg-slate-800 text-slate-300 px-2 py-1 rounded-lg"
+                                onClick={() =>
+                                  setCancellingSlotId((prev) => (prev === slot.id ? null : slot.id))
+                                }
+                                className="text-[11px] bg-slate-800 hover:bg-amber-950/60 text-amber-300 px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
                               >
-                                Non
+                                <Ban className="w-3.5 h-3.5" />
+                                <span>Salle indispo</span>
                               </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteSlotId(slot.id)}
-                              className="text-[11px] text-slate-400 hover:text-red-400 px-2.5 py-1.5 rounded-lg hover:bg-red-950/40 flex items-center gap-1 transition"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Supprimer créneau</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                            )}
 
-                    {/* Confirmation annulation créneau avec motif */}
-                    {canEdit && cancellingSlotId === slot.id && !isCancelled && (
-                      <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-xs">
-                        <input
-                          type="text"
-                          value={cancelReasonInput}
-                          onChange={(e) => setCancelReasonInput(e.target.value)}
-                          placeholder="Motif (ex: Salle de jeu indisponible)"
-                          className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleToggleCancelSlot(slot.id, false)}
-                          className="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 rounded-lg"
-                        >
-                          Confirmer l'annulation
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Disponibles à répartir (Édition) */}
-                    {canEdit && !isCancelled && unassignedDisponibles.length > 0 && (
-                      <div className="bg-slate-900 border border-indigo-500/30 rounded-xl p-3.5 space-y-2.5">
-                        <span className="text-xs font-semibold text-indigo-300 block">
-                          Disponibles à répartir ({unassignedDisponibles.length})
-                        </span>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                          {unassignedDisponibles.map((userId) => {
-                            const info = getUserInfo(userId);
-                            return (
-                              <div
-                                key={userId}
-                                className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 flex items-center justify-between gap-2"
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                  <span className="truncate">{info.name}</span>
-                                  {renderQuotaBadge(userId)}
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => moveToSelected(slot.id, userId)}
-                                    className="text-[10px] bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/60 px-2 py-0.5 rounded transition"
-                                  >
-                                    Titulaire
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => moveToWaitlist(slot.id, userId)}
-                                    className="text-[10px] bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded transition"
-                                  >
-                                    Attente
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Incertains disponibles en dépannage (Édition) */}
-                    {canEdit && !isCancelled && unassignedIncertains.length > 0 && (
-                      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3 space-y-2">
-                        <span className="text-[11px] font-medium text-amber-300 flex items-center gap-1.5">
-                          <HelpCircle className="w-3.5 h-3.5" />
-                          Joueurs incertains mobilisables si besoin ({unassignedIncertains.length})
-                        </span>
-                        <div className="flex flex-wrap gap-2">
-                          {unassignedIncertains.map((userId) => {
-                            const info = getUserInfo(userId);
-                            return (
-                              <div
-                                key={userId}
-                                className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px] flex items-center gap-2"
-                              >
-                                <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                <span className="text-slate-200">{info.name}</span>
+                            {confirmDeleteSlotId === slot.id ? (
+                              <div className="flex items-center gap-1.5 text-[11px]">
+                                <span className="text-red-300">Supprimer ?</span>
                                 <button
                                   type="button"
-                                  onClick={() => moveToSelected(slot.id, userId)}
-                                  className="text-[10px] text-emerald-300 hover:underline"
+                                  onClick={() => handleConfirmDeleteSlot(slot.id)}
+                                  className="bg-red-600 hover:bg-red-500 text-white px-2.5 py-1 rounded-lg font-semibold"
                                 >
-                                  + Titulaire
+                                  Oui
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteSlotId(null)}
+                                  className="bg-slate-800 text-slate-300 px-2 py-1 rounded-lg"
+                                >
+                                  Non
                                 </button>
                               </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Titulaires & Liste d'attente */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Colonne Titulaires */}
-                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
-                            <CheckCircle className="w-3.5 h-3.5" />
-                            Titulaires ({slot.selectedIds.length}/{slotMax})
-                          </span>
-                          {canEdit && (
-                            <span className="text-[10px] text-slate-400">
-                              Cliquez Éq. pour basculer A/B
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="space-y-1.5">
-                          {slot.selectedIds.map((userId) => {
-                            const info = getUserInfo(userId);
-                            const team = slot.teamAssignments?.[userId];
-                            return (
-                              <div
-                                key={userId}
-                                className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 flex items-center justify-between gap-2"
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteSlotId(slot.id)}
+                                className="text-[11px] text-slate-400 hover:text-red-400 px-2.5 py-1.5 rounded-lg hover:bg-red-950/40 flex items-center gap-1 transition"
                               >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                  <span className="truncate">{info.name}</span>
-                                  {renderQuotaBadge(userId)}
-                                  {team && (
-                                    <span
-                                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                                        team === 'A'
-                                          ? 'bg-blue-600/30 text-blue-300 border border-blue-500/40'
-                                          : 'bg-rose-600/30 text-rose-300 border border-rose-500/40'
-                                      }`}
-                                    >
-                                      Éq. {team}
-                                    </span>
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Supprimer</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Confirmation annulation avec motif */}
+                      {canEdit && cancellingSlotId === slot.id && !isCancelled && (
+                        <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-xs animate-fade-slide-up">
+                          <input
+                            type="text"
+                            value={cancelReasonInput}
+                            onChange={(e) => setCancelReasonInput(e.target.value)}
+                            placeholder="Motif (ex: Salle de jeu indisponible)"
+                            className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCancelSlot(slot.id, false)}
+                            className="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3.5 py-2 rounded-lg"
+                          >
+                            Confirmer l'annulation
+                          </button>
+                        </div>
+                      )}
+
+                      {/* ZONE 2 : Composition (Titulaires vs File d'attente & Pool à placer) */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+                        {/* Carte Gauche : Titulaires */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                Titulaires ({slot.selectedIds.length} / {slotMax})
+                              </span>
+                              {canEdit && (
+                                <span className="text-[10px] text-slate-400">
+                                  Tap badge pour A/B
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full transition-all duration-300 ${fillColor}`}
+                                style={{ width: `${fillPct}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            {slot.selectedIds.map((userId) => {
+                              const info = getUserInfo(userId);
+                              const team = slot.teamAssignments?.[userId];
+                              return (
+                                <div
+                                  key={userId}
+                                  className="min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 flex items-center justify-between gap-2"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    {canEdit ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => cyclePlayerTeam(slot.id, userId)}
+                                        className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition active:scale-95 shrink-0 ${
+                                          team === 'A'
+                                            ? 'bg-blue-600/30 text-blue-300 border-blue-500/50'
+                                            : team === 'B'
+                                            ? 'bg-rose-600/30 text-rose-300 border-rose-500/50'
+                                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                                        }`}
+                                        title="Basculer Équipe A / B / Aucune"
+                                      >
+                                        {team ? `Éq.${team}` : 'Éq.'}
+                                      </button>
+                                    ) : (
+                                      team && (
+                                        <span
+                                          className={`text-[10px] font-bold px-2 py-0.5 rounded-lg shrink-0 ${
+                                            team === 'A'
+                                              ? 'bg-blue-600/30 text-blue-300 border border-blue-500/40'
+                                              : 'bg-rose-600/30 text-rose-300 border border-rose-500/40'
+                                          }`}
+                                        >
+                                          Éq.{team}
+                                        </span>
+                                      )
+                                    )}
+                                    <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
+                                    <span className="truncate font-medium">{info.name}</span>
+                                    {renderQuotaBadge(userId)}
+                                  </div>
+
+                                  {canEdit && (
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => moveToWaitlist(slot.id, userId)}
+                                        className="text-[11px] bg-slate-800 hover:bg-slate-700 text-amber-300 px-2 py-1.5 rounded-lg transition flex items-center gap-1 active:scale-95"
+                                        title="Mettre en file d'attente"
+                                      >
+                                        <UserMinus className="w-3 h-3" />
+                                        <span className="hidden xs:inline">Attente</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => removeFromAssignment(slot.id, userId)}
+                                        className="text-slate-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-950/40 transition"
+                                        title="Retirer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
-                                {canEdit && (
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => cyclePlayerTeam(slot.id, userId)}
-                                      className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded transition"
-                                      title="Basculer Équipe A / B / Aucune"
-                                    >
-                                      {team ? `Éq.${team}` : 'Éq.'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => moveToWaitlist(slot.id, userId)}
-                                      className="text-[10px] bg-slate-800 hover:bg-slate-700 text-amber-300 px-2 py-0.5 rounded transition flex items-center gap-1"
-                                      title="Mettre en attente"
-                                    >
-                                      <UserMinus className="w-3 h-3" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeFromAssignment(slot.id, userId)}
-                                      className="text-slate-400 hover:text-red-400 p-0.5 rounded transition"
-                                      title="Retirer"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
 
-                          {slot.selectedIds.length === 0 && (
-                            <p className="text-xs text-slate-400 italic py-2 text-center">
-                              Aucun titulaire sélectionné pour le moment
-                            </p>
+                            {slot.selectedIds.length === 0 && (
+                              <p className="text-xs text-slate-400 italic py-4 text-center">
+                                Aucun titulaire sélectionné pour le moment
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Carte Droite : File d'attente + Disponibles à placer */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-4">
+                          {/* Liste d'attente */}
+                          <div className="space-y-2">
+                            <span className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5" />
+                              Liste d'attente ({slot.waitlistIds.length})
+                            </span>
+
+                            <div className="space-y-1.5">
+                              {slot.waitlistIds.map((userId) => {
+                                const info = getUserInfo(userId);
+                                return (
+                                  <div
+                                    key={userId}
+                                    className="min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 flex items-center justify-between gap-2"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
+                                      <span className="truncate font-medium">{info.name}</span>
+                                      {renderQuotaBadge(userId)}
+                                    </div>
+                                    {canEdit && (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => moveToSelected(slot.id, userId)}
+                                          className="text-[11px] bg-slate-800 hover:bg-emerald-950 text-emerald-300 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 active:scale-95"
+                                          title="Passer titulaire"
+                                        >
+                                          <UserCheck className="w-3 h-3" />
+                                          <span>Titulaire</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeFromAssignment(slot.id, userId)}
+                                          className="text-slate-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-950/40 transition"
+                                          title="Retirer"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+
+                              {slot.waitlistIds.length === 0 && (
+                                <p className="text-xs text-slate-500 italic py-2 text-center">
+                                  Aucun joueur en attente
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Disponibles à placer */}
+                          {canEdit && !isCancelled && unassignedDisponibles.length > 0 && (
+                            <div className="pt-3 border-t border-slate-800 space-y-2">
+                              <span className="text-xs font-semibold text-indigo-300 block">
+                                Disponibles à placer ({unassignedDisponibles.length})
+                              </span>
+
+                              <div className="space-y-1.5">
+                                {unassignedDisponibles.map((userId) => {
+                                  const info = getUserInfo(userId);
+                                  return (
+                                    <div
+                                      key={userId}
+                                      className="min-h-[44px] bg-slate-950 border border-indigo-500/25 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 flex items-center justify-between gap-2"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
+                                        <span className="truncate font-medium">{info.name}</span>
+                                        {renderQuotaBadge(userId)}
+                                      </div>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => moveToSelected(slot.id, userId)}
+                                          className="text-[11px] bg-emerald-950/80 hover:bg-emerald-700 text-emerald-300 hover:text-white border border-emerald-700/60 px-2.5 py-1.5 rounded-lg transition active:scale-95"
+                                        >
+                                          + Titulaire
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => moveToWaitlist(slot.id, userId)}
+                                          className="text-[11px] bg-amber-950/80 hover:bg-amber-700 text-amber-300 hover:text-white border border-amber-700/60 px-2 py-1.5 rounded-lg transition active:scale-95"
+                                        >
+                                          + Attente
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
 
-                      {/* Colonne Liste d'attente */}
-                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-semibold text-amber-400 flex items-center gap-1.5">
-                            <Clock className="w-3.5 h-3.5" />
-                            Liste d'attente ({slot.waitlistIds.length})
-                          </span>
+                      {/* ZONE 3 : Récapitulatif compact des votes par onglets */}
+                      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3 space-y-2.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVoteTabBySlot((prev) => ({ ...prev, [slot.id]: 'dispo' }))
+                            }
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition border ${
+                              activeVoteTab === 'dispo'
+                                ? 'bg-emerald-950/70 border-emerald-600/60 text-emerald-300'
+                                : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            🟢 Dispo ({slot.disponibles.length})
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVoteTabBySlot((prev) => ({ ...prev, [slot.id]: 'incertain' }))
+                            }
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition border ${
+                              activeVoteTab === 'incertain'
+                                ? 'bg-amber-950/70 border-amber-600/60 text-amber-300'
+                                : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            🟡 Incertains ({slot.incertains.length})
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVoteTabBySlot((prev) => ({ ...prev, [slot.id]: 'indispo' }))
+                            }
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition border ${
+                              activeVoteTab === 'indispo'
+                                ? 'bg-red-950/70 border-red-600/60 text-red-300'
+                                : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            🔴 Indispo ({slot.indisponibles.length})
+                          </button>
                         </div>
 
-                        <div className="space-y-1.5">
-                          {slot.waitlistIds.map((userId) => {
-                            const info = getUserInfo(userId);
-                            return (
-                              <div
-                                key={userId}
-                                className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 flex items-center justify-between gap-2"
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                  <span className="truncate">{info.name}</span>
-                                  {renderQuotaBadge(userId)}
-                                </div>
-                                {canEdit && (
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => moveToSelected(slot.id, userId)}
-                                      className="text-[10px] bg-slate-800 hover:bg-slate-700 text-emerald-300 px-2 py-0.5 rounded transition flex items-center gap-1"
-                                      title="Passer titulaire"
-                                    >
-                                      <UserCheck className="w-3 h-3" />
-                                      Titulaire
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeFromAssignment(slot.id, userId)}
-                                      className="text-slate-400 hover:text-red-400 p-0.5 rounded transition"
-                                      title="Retirer"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-
-                          {slot.waitlistIds.length === 0 && (
-                            <p className="text-xs text-slate-400 italic py-2 text-center">
-                              Aucun joueur en liste d'attente
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Détail de tous les votes */}
-                    <div className="pt-2 border-t border-slate-800/80">
-                      <p className="text-xs font-medium text-slate-400 mb-2">
-                        Détail des réponses sur ce créneau :
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                        <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
-                          <p className="font-semibold text-emerald-400 mb-1.5">
-                            🟢 Disponibles ({slot.disponibles.length})
-                          </p>
-                          <div className="space-y-1.5 text-slate-300">
-                            {slot.disponibles.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {activeVoteTab === 'dispo' &&
+                            (slot.disponibles.length > 0 ? (
                               slot.disponibles.map((id) => {
                                 const info = getUserInfo(id);
                                 return (
-                                  <div key={id} className="flex items-center gap-1.5">
+                                  <span
+                                    key={id}
+                                    className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-full px-2.5 py-1 text-xs text-slate-200"
+                                  >
                                     <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                    <span className="truncate">{info.name}</span>
-                                  </div>
+                                    <span>{info.name}</span>
+                                  </span>
                                 );
                               })
                             ) : (
-                              <span className="text-slate-400 italic">Aucun</span>
-                            )}
-                          </div>
-                        </div>
+                              <span className="text-xs text-slate-500 italic">Aucun disponible</span>
+                            ))}
 
-                        <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
-                          <p className="font-semibold text-amber-400 mb-1.5">
-                            🟡 Incertains ({slot.incertains.length})
-                          </p>
-                          <div className="space-y-1.5 text-slate-300">
-                            {slot.incertains.length > 0 ? (
+                          {activeVoteTab === 'incertain' &&
+                            (slot.incertains.length > 0 ? (
                               slot.incertains.map((id) => {
                                 const info = getUserInfo(id);
+                                const canPromoteIncertain =
+                                  canEdit && !isCancelled && unassignedIncertains.includes(id);
                                 return (
-                                  <div key={id} className="flex items-center gap-1.5">
+                                  <span
+                                    key={id}
+                                    className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-full px-2.5 py-1 text-xs text-slate-200"
+                                  >
                                     <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                    <span className="truncate">{info.name}</span>
-                                  </div>
+                                    <span>{info.name}</span>
+                                    {canPromoteIncertain && (
+                                      <button
+                                        type="button"
+                                        onClick={() => moveToSelected(slot.id, id)}
+                                        className="text-[10px] text-emerald-300 hover:text-emerald-200 font-semibold ml-1"
+                                      >
+                                        + Titulaire
+                                      </button>
+                                    )}
+                                  </span>
                                 );
                               })
                             ) : (
-                              <span className="text-slate-400 italic">Aucun</span>
-                            )}
-                          </div>
-                        </div>
+                              <span className="text-xs text-slate-500 italic">Aucun incertain</span>
+                            ))}
 
-                        <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
-                          <p className="font-semibold text-red-400 mb-1.5">
-                            🔴 Indisponibles ({slot.indisponibles.length})
-                          </p>
-                          <div className="space-y-1.5 text-slate-300">
-                            {slot.indisponibles.length > 0 ? (
+                          {activeVoteTab === 'indispo' &&
+                            (slot.indisponibles.length > 0 ? (
                               slot.indisponibles.map((id) => {
                                 const info = getUserInfo(id);
                                 return (
-                                  <div key={id} className="flex items-center gap-1.5">
+                                  <span
+                                    key={id}
+                                    className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-full px-2.5 py-1 text-xs text-slate-400"
+                                  >
                                     <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                    <span className="truncate">{info.name}</span>
-                                  </div>
+                                    <span>{info.name}</span>
+                                  </span>
                                 );
                               })
                             ) : (
-                              <span className="text-slate-400 italic">Aucun</span>
-                            )}
-                          </div>
+                              <span className="text-xs text-slate-500 italic">Aucun indisponible</span>
+                            ))}
                         </div>
                       </div>
-                    </div>
 
-                    {/* Bouton Enregistrer ce créneau */}
-                    {canEdit && isDirty && (
-                      <div className="pt-2 flex justify-end">
-                        <button
-                          type="button"
-                          disabled={isSavingThis}
-                          onClick={() => handleSaveSingleSlot(slot.id)}
-                          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-semibold text-xs py-2 px-4 rounded-xl transition flex items-center gap-1.5 shadow"
-                        >
-                          {isSavingThis ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Shield className="w-3.5 h-3.5" />
-                          )}
-                          <span>Enregistrer ce créneau</span>
-                        </button>
-                      </div>
-                    )}
+                      {/* Bouton Enregistrer ce créneau */}
+                      {canEdit && isDirty && (
+                        <div className="pt-1 flex justify-end">
+                          <button
+                            type="button"
+                            disabled={isSavingThis}
+                            onClick={() => handleSaveSingleSlot(slot.id)}
+                            className="w-full sm:w-auto min-h-[42px] bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-semibold text-xs py-2 px-4 rounded-xl transition flex items-center justify-center gap-1.5 shadow active:scale-95"
+                          >
+                            {isSavingThis ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Shield className="w-3.5 h-3.5" />
+                            )}
+                            <span>Enregistrer ce créneau</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             );
           })}
         </div>
       )}
 
-      {/* TAB 2: SUIVI DES MEMBRES & PARTIES */}
+      {/* Barre flottante discrète si modifications locales (sans message d'erreur) */}
+      {canEdit && !optimizationBanner && dirtySlotIds.length > 0 && activeTab === 'planning' && (
+        <div className="sticky bottom-[72px] sm:bottom-6 z-30 bg-slate-900/95 backdrop-blur-md border border-indigo-500/40 rounded-2xl p-3.5 shadow-2xl flex flex-wrap items-center justify-between gap-2 animate-fade-slide-up">
+          <span className="text-xs text-slate-300 font-medium">
+            {dirtySlotIds.length} créneau(x) prêt(s) à enregistrer
+          </span>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              type="button"
+              onClick={handleDiscardAllDrafts}
+              disabled={savingAll}
+              className="px-3 py-2 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveAllDrafts}
+              disabled={savingAll}
+              className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition flex items-center gap-1.5 shadow active:scale-95"
+            >
+              {savingAll && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>Enregistrer le planning ({dirtySlotIds.length})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: SUIVI DES MEMBRES & PARTIES (RESPONSIVE MOBILE + DESKTOP) */}
       {activeTab === 'members' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
+        <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-bold text-white">
               Suivi individuel et charge sur le mois
@@ -1865,7 +1899,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                   key={f.key}
                   type="button"
                   onClick={() => setMemberFilter(f.key as any)}
-                  className={`px-2.5 py-1 rounded-lg border transition ${
+                  className={`px-2.5 py-1.5 rounded-lg border transition ${
                     memberFilter === f.key
                       ? 'bg-indigo-600 border-indigo-500 text-white font-medium'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
@@ -1877,7 +1911,73 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Vue Mobile : Cartes individuelles */}
+          <div className="md:hidden space-y-2.5">
+            {memberRows.map((row) => (
+              <div
+                key={row.uid}
+                className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2.5 text-xs"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <UserAvatar avatar={row.avatar} name={row.name} size="sm" />
+                    <div className="min-w-0">
+                      <p className="font-semibold text-white truncate">{row.name}</p>
+                      {row.roles.length > 0 && (
+                        <p className="text-[10px] text-slate-400 truncate">
+                          {row.roles.slice(0, 3).join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {row.hasResponded ? (
+                    <span className="text-[11px] bg-emerald-950/60 text-emerald-400 border border-emerald-800/50 px-2 py-0.5 rounded-lg font-medium shrink-0">
+                      Répondu
+                    </span>
+                  ) : (
+                    <span className="text-[11px] bg-amber-950/60 text-amber-400 border border-amber-800/50 px-2 py-0.5 rounded-lg font-medium shrink-0">
+                      En attente
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-center">
+                  <div className="bg-slate-900 rounded-lg p-1.5">
+                    <p className="text-[10px] text-slate-400">Dispos</p>
+                    <p className="font-semibold text-slate-200 mt-0.5">
+                      {row.dispoCount}
+                      {row.incertainCount > 0 ? ` (+${row.incertainCount})` : ''}
+                    </p>
+                  </div>
+                  <div className="bg-slate-900 rounded-lg p-1.5">
+                    <p className="text-[10px] text-slate-400">Souhait</p>
+                    <p className="font-mono font-semibold text-slate-200 mt-0.5">
+                      {row.desired === undefined
+                        ? '—'
+                        : row.desired === null
+                        ? '∞'
+                        : row.desired}
+                    </p>
+                  </div>
+                  <div className="bg-slate-900 rounded-lg p-1.5">
+                    <p className="text-[10px] text-slate-400">Attribuées / Mois</p>
+                    <p className="font-mono font-semibold text-emerald-300 mt-0.5">
+                      {row.assignedHere} / {row.monthTotal}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {memberRows.length === 0 && (
+              <p className="py-6 text-center text-xs text-slate-500 italic">
+                Aucun membre dans cette catégorie.
+              </p>
+            )}
+          </div>
+
+          {/* Vue Desktop : Tableau complet */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400">
@@ -1961,7 +2061,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
           <div
             role="alertdialog"
             aria-modal="true"
-            className="bg-slate-900 border-2 border-red-500/70 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4"
+            className="bg-slate-900 border-2 border-red-500/70 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-modal-pop"
           >
             <div className="flex items-center gap-3 text-red-400">
               <div className="w-10 h-10 rounded-xl bg-red-950/70 border border-red-700/60 flex items-center justify-center shrink-0">
@@ -1985,14 +2085,14 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setPendingPollSwitchId(null)}
-                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition"
+                className="px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition active:scale-95"
               >
                 Rester et enregistrer
               </button>
               <button
                 type="button"
                 onClick={() => switchPollNow(pendingPollSwitchId)}
-                className="px-4 py-2 text-xs font-medium text-red-300 hover:text-white bg-red-950/70 hover:bg-red-700 border border-red-800/60 rounded-xl transition"
+                className="px-4 py-2.5 text-xs font-medium text-red-300 hover:text-white bg-red-950/70 hover:bg-red-700 border border-red-800/60 rounded-xl transition active:scale-95"
               >
                 Changer sans enregistrer
               </button>

@@ -37,7 +37,7 @@ export function App() {
     return params.get('poll');
   });
 
-  // Garde contre les modifications non sauvegardées
+  // Garde contre les modifications non sauvegardées (déclenché uniquement au changement de page)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 
@@ -51,7 +51,6 @@ export function App() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasUnsavedChanges]);
 
-  // Dériver l'écran affiché pour éviter tout setState synchrone dans useEffect
   const deepLinkMatch = Boolean(
     deepLinkPollId && polls.some((p) => p.id === deepLinkPollId)
   );
@@ -134,16 +133,16 @@ export function App() {
   };
 
   return (
-    <div
-      className="min-h-screen bg-slate-950 text-slate-100 flex flex-col"
-      style={{
-        backgroundImage: `linear-gradient(to bottom, rgba(2, 6, 23, 0.82), rgba(2, 6, 23, 0.94)), url(${bgFond})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundAttachment: 'fixed',
-      }}
-    >
+    <div className="min-h-screen text-slate-100 flex flex-col relative">
+      {/* Couche de fond fixe performante sur iOS / Android */}
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 -z-10 bg-slate-950 bg-cover bg-center bg-no-repeat pointer-events-none"
+        style={{
+          backgroundImage: `linear-gradient(to bottom, rgba(2, 6, 23, 0.82), rgba(2, 6, 23, 0.94)), url(${bgFond})`,
+        }}
+      />
+
       {/* Barre de navigation */}
       {!authLoading && effectiveScreen !== 'login' && userProfile && (
         <Navbar
@@ -154,11 +153,11 @@ export function App() {
         />
       )}
 
-      {/* Main Content View */}
-      <main className="flex-1 flex flex-col w-full">
+      {/* Main Content View (padding bas suffisant pour la barre mobile) */}
+      <main className="flex-1 flex flex-col w-full pb-24 sm:pb-8">
         {authLoading ? (
           <div className="flex-1 flex items-center justify-center px-4">
-            <div className="flex flex-col items-center gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl px-8 py-6 shadow-2xl">
+            <div className="flex flex-col items-center gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl px-8 py-6 shadow-2xl animate-modal-pop">
               <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
               <p className="text-sm text-slate-300 font-medium">
                 Vérification de la connexion Discord...
@@ -166,7 +165,7 @@ export function App() {
             </div>
           </div>
         ) : (
-          <>
+          <div key={effectiveScreen} className="w-full animate-fade-slide-up">
             {effectiveScreen === 'login' && <LoginScreen />}
 
             {effectiveScreen === 'dashboard' && userProfile && (
@@ -225,17 +224,17 @@ export function App() {
                 onBack={() => navigateTo('dashboard')}
               />
             )}
-          </>
+          </div>
         )}
       </main>
 
-      {/* Modale d'erreur : modifications non sauvegardées */}
+      {/* Modale d'alerte : affichée uniquement quand l'utilisateur essaie de quitter sans sauvegarder */}
       {pendingAction && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <div
             role="alertdialog"
             aria-modal="true"
-            className="bg-slate-900 border-2 border-red-500/70 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4"
+            className="bg-slate-900 border-2 border-red-500/70 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-modal-pop"
           >
             <div className="flex items-center gap-3 text-red-400">
               <div className="w-10 h-10 rounded-xl bg-red-950/70 border border-red-700/60 flex items-center justify-center shrink-0">
@@ -259,7 +258,7 @@ export function App() {
               <button
                 type="button"
                 onClick={() => setPendingAction(null)}
-                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition"
+                className="px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition active:scale-95"
               >
                 Rester et enregistrer
               </button>
@@ -271,7 +270,7 @@ export function App() {
                   setHasUnsavedChanges(false);
                   action();
                 }}
-                className="px-4 py-2 text-xs font-medium text-red-300 hover:text-white bg-red-950/70 hover:bg-red-700 border border-red-800/60 rounded-xl transition"
+                className="px-4 py-2.5 text-xs font-medium text-red-300 hover:text-white bg-red-950/70 hover:bg-red-700 border border-red-800/60 rounded-xl transition active:scale-95"
               >
                 Quitter sans enregistrer
               </button>

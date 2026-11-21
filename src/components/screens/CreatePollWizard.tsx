@@ -557,7 +557,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
   };
 
   return (
-    <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5 sm:space-y-6">
 
       {/* Top Breadcrumb */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
@@ -565,21 +565,15 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
           <button
             type="button"
             onClick={onCancel}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition mb-1"
+            className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition mb-1"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             Retour à l'accueil
           </button>
-          <h2 className="text-xl font-bold text-white">Créer un sondage hebdomadaire</h2>
+          <h2 className="text-lg sm:text-xl font-bold text-white">Créer un sondage hebdomadaire</h2>
         </div>
 
         <div className="flex items-center gap-2">
-          {hasEdits && (
-            <span className="text-[11px] bg-amber-950/70 border border-amber-600/50 text-amber-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              Sondage non encore publié
-            </span>
-          )}
           {step < 4 && (
             <button
               type="button"
@@ -593,13 +587,13 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         </div>
       </div>
 
-      {/* Steps Indicator */}
-      <div className="grid grid-cols-4 gap-2 sm:gap-3">
+      {/* Steps Indicator (lisible sur mobile et desktop) */}
+      <div className="grid grid-cols-4 gap-1.5 sm:gap-3">
         {[
-          { num: 1, title: 'Semaine & Type', icon: Settings2 },
-          { num: 2, title: 'Créneaux & Profils', icon: Calendar },
-          { num: 3, title: 'Membres ciblés', icon: Users },
-          { num: 4, title: 'Validation', icon: Check },
+          { num: 1, short: 'Infos', title: 'Semaine & Type', icon: Settings2 },
+          { num: 2, short: 'Créneaux', title: 'Créneaux & Profils', icon: Calendar },
+          { num: 3, short: 'Membres', title: 'Membres ciblés', icon: Users },
+          { num: 4, short: 'Valider', title: 'Validation', icon: Check },
         ].map((s) => {
           const IconComponent = s.icon;
           const isActive = step === s.num;
@@ -610,7 +604,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               key={s.num}
               type="button"
               onClick={() => setStep(s.num)}
-              className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
+              className={`p-2 sm:p-3 rounded-xl border text-left transition flex flex-col sm:flex-row items-center sm:items-center gap-1 sm:gap-2.5 ${
                 isActive
                   ? 'bg-indigo-950/60 border-indigo-500 text-white shadow-md shadow-indigo-950/30'
                   : isPassed
@@ -629,6 +623,9 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               >
                 {isPassed ? <Check className="w-3.5 h-3.5" /> : <IconComponent className="w-3.5 h-3.5" />}
               </div>
+              <span className="sm:hidden text-[11px] font-semibold leading-tight text-center">
+                {s.num}. {s.short}
+              </span>
               <div className="hidden sm:block">
                 <p className="text-xs font-semibold leading-tight">{s.title}</p>
               </div>
@@ -872,12 +869,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                 </button>
               </div>
 
-              {newProfileName.trim() !== '' && (
-                <p className="text-[11px] text-amber-300">
-                  Nom de profil saisi non encore enregistré — cliquez sur « Enregistrer ce planning en profil ».
-                </p>
-              )}
-
               {profileMessage && (
                 <p className="text-[11px] text-emerald-300">{profileMessage}</p>
               )}
@@ -981,38 +972,50 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                         {day.slots.map((slot, slotIdx) => (
                           <div
                             key={slotIdx}
-                            className="flex flex-wrap items-center gap-2.5 bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl text-xs"
+                            className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2.5 bg-slate-900/90 border border-slate-800 p-3 rounded-xl text-xs"
                           >
-                            <span className="text-slate-400 font-medium shrink-0">
-                              Créneau {slotIdx + 1} :
-                            </span>
-
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] text-slate-400">De</span>
-                              <input
-                                type="time"
-                                value={slot.startTime}
-                                onChange={(e) =>
-                                  updateSlotTime(dayIdx, slotIdx, 'startTime', e.target.value)
-                                }
-                                className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
-                              />
+                            <div className="flex items-center justify-between gap-2 sm:justify-start">
+                              <span className="text-slate-400 font-medium shrink-0">
+                                Créneau {slotIdx + 1} :
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeSlotFromDay(dayIdx, slotIdx)}
+                                className="sm:hidden text-slate-400 hover:text-red-400 p-1.5 rounded-lg bg-slate-950 border border-slate-800 transition"
+                                title="Supprimer ce créneau"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
 
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] text-slate-400">à</span>
-                              <input
-                                type="time"
-                                value={slot.endTime}
-                                onChange={(e) =>
-                                  updateSlotTime(dayIdx, slotIdx, 'endTime', e.target.value)
-                                }
-                                className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
-                              />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] text-slate-400">De</span>
+                                <input
+                                  type="time"
+                                  value={slot.startTime}
+                                  onChange={(e) =>
+                                    updateSlotTime(dayIdx, slotIdx, 'startTime', e.target.value)
+                                  }
+                                  className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                                />
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] text-slate-400">à</span>
+                                <input
+                                  type="time"
+                                  value={slot.endTime}
+                                  onChange={(e) =>
+                                    updateSlotTime(dayIdx, slotIdx, 'endTime', e.target.value)
+                                  }
+                                  className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                                />
+                              </div>
                             </div>
 
-                            <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800 px-2.5 py-1 rounded-lg">
-                              <label className="flex items-center gap-1 text-[11px] text-slate-300">
+                            <div className="flex items-center justify-between sm:justify-start gap-2 bg-slate-950/80 border border-slate-800 px-2.5 py-1.5 rounded-lg">
+                              <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
                                 <span className="text-slate-400">Min</span>
                                 <input
                                   type="number"
@@ -1030,7 +1033,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                                   className="w-12 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
                                 />
                               </label>
-                              <label className="flex items-center gap-1 text-[11px] text-slate-300">
+                              <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
                                 <span className="text-slate-400">Max</span>
                                 <input
                                   type="number"
@@ -1054,7 +1057,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                               (2 matchs de 40 min = 1h20)
                             </span>
 
-                            <div className="ml-auto flex items-center">
+                            <div className="hidden sm:flex ml-auto items-center">
                               <button
                                 type="button"
                                 onClick={() => removeSlotFromDay(dayIdx, slotIdx)}
@@ -1231,7 +1234,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                         key={member.discordId}
                         type="button"
                         onClick={() => addMemberToTarget(member.discordId)}
-                        className="w-full p-2 rounded-xl bg-slate-900/90 hover:bg-indigo-950/50 border border-slate-800 hover:border-indigo-500/50 text-left flex items-center justify-between gap-2 transition group"
+                        className="w-full min-h-[44px] p-2 rounded-xl bg-slate-900/90 hover:bg-indigo-950/50 border border-slate-800 hover:border-indigo-500/50 text-left flex items-center justify-between gap-2 transition active:scale-[0.99] group"
                         title="Cliquer pour ajouter aux membres concernés"
                       >
                         <div className="flex items-center gap-2 min-w-0">
@@ -1285,7 +1288,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                         key={member.discordId}
                         type="button"
                         onClick={() => removeMemberFromTarget(member.discordId)}
-                        className="w-full p-2 rounded-xl bg-emerald-950/25 hover:bg-red-950/35 border border-emerald-700/40 hover:border-red-500/50 text-left flex items-center justify-between gap-2 transition group"
+                        className="w-full min-h-[44px] p-2 rounded-xl bg-emerald-950/25 hover:bg-red-950/35 border border-emerald-700/40 hover:border-red-500/50 text-left flex items-center justify-between gap-2 transition active:scale-[0.99] group"
                         title="Cliquer pour retirer ce membre"
                       >
                         <div className="flex items-center gap-2 min-w-0">

@@ -113,13 +113,13 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
   };
 
   return (
-    <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5">
 
       {/* Back to dashboard button */}
       {onBack && (
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition group mb-1"
+          className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition group mb-1"
         >
           <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition" />
           <span>Retour à l'accueil</span>
@@ -127,9 +127,9 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
       )}
 
       {/* Header Info */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+      <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="bg-indigo-900/40 text-indigo-300 text-xs font-semibold px-2.5 py-0.5 rounded-lg border border-indigo-700/40">
               {TRAINING_TYPE_LABELS[poll.type] || poll.type}
             </span>
@@ -153,7 +153,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
         </div>
 
         <div>
-          <h2 className="text-xl font-bold text-white">{poll.title}</h2>
+          <h2 className="text-lg sm:text-xl font-bold text-white leading-snug">{poll.title}</h2>
           <p className="text-xs text-slate-400 mt-1">
             Indiquez votre disponibilité pour chaque créneau (1 partie = 1 double session : 2 matchs de 40 min = 1h20).
           </p>
@@ -177,7 +177,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
       </div>
 
       {/* Objectif de parties sur la période */}
-      <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-lg space-y-3">
+      <div className="bg-slate-900/95 border border-indigo-500/30 rounded-2xl p-4 sm:p-5 shadow-lg space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-indigo-950/80 border border-indigo-700/50 flex items-center justify-center shrink-0">
@@ -193,7 +193,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
             </div>
           </div>
 
-          <span className="text-xs font-semibold text-indigo-300 bg-indigo-950/80 px-3 py-1 rounded-lg border border-indigo-800/60 self-start sm:self-auto">
+          <span className="text-xs font-semibold text-indigo-300 bg-indigo-950/80 px-3 py-1 rounded-lg border border-indigo-800/60 self-start sm:self-auto shrink-0">
             {effectiveDesiredGames === null
               ? 'Illimité'
               : effectiveDesiredGames === 0
@@ -211,7 +211,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                 type="button"
                 disabled={isClosed}
                 onClick={() => handleDesiredChange(num)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition disabled:opacity-50 ${
+                className={`min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-semibold border transition active:scale-95 disabled:opacity-50 ${
                   active
                     ? 'bg-indigo-600 border-indigo-400 text-white shadow'
                     : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
@@ -226,7 +226,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
             type="button"
             disabled={isClosed}
             onClick={() => handleDesiredChange(null)}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition disabled:opacity-50 ${
+            className={`min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-semibold border transition active:scale-95 disabled:opacity-50 ${
               effectiveDesiredGames === null
                 ? 'bg-emerald-600 border-emerald-400 text-white shadow'
                 : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
@@ -235,7 +235,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
             Illimité
           </button>
 
-          <div className="ml-auto flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1">
+          <div className="w-full sm:w-auto sm:ml-auto flex items-center justify-center sm:justify-end gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1">
             <button
               type="button"
               disabled={isClosed || (effectiveDesiredGames !== null && effectiveDesiredGames <= 0)}
@@ -244,12 +244,12 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                   effectiveDesiredGames === null ? 5 : Math.max(0, effectiveDesiredGames - 1)
                 )
               }
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+              className="w-9 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:bg-slate-800 disabled:opacity-40 active:scale-95"
               title="Diminuer"
             >
               <Minus className="w-3.5 h-3.5" />
             </button>
-            <span className="text-xs font-mono font-bold text-white w-8 text-center">
+            <span className="text-xs font-mono font-bold text-white w-9 text-center">
               {effectiveDesiredGames === null ? '∞' : effectiveDesiredGames}
             </span>
             <button
@@ -260,7 +260,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                   effectiveDesiredGames === null ? 1 : Math.min(15, effectiveDesiredGames + 1)
                 )
               }
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+              className="w-9 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:bg-slate-800 disabled:opacity-40 active:scale-95"
               title="Augmenter"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -280,7 +280,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
           return (
             <div
               key={slot.id}
-              className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 transition shadow-lg space-y-4 ${
+              className={`bg-slate-900/95 border rounded-2xl p-4 sm:p-5 transition duration-200 shadow-lg space-y-4 ${
                 isSlotCancelled
                   ? 'border-red-900/40 bg-slate-950/60 opacity-65'
                   : currentVote === 'DISPONIBLE'
@@ -293,17 +293,17 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
               }`}
             >
               {/* Slot Header */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center text-slate-300">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center text-slate-300 shrink-0">
                     {isSlotCancelled ? (
                       <Ban className="w-4 h-4 text-red-400" />
                     ) : (
                       <Calendar className="w-4 h-4 text-indigo-400" />
                     )}
                   </div>
-                  <div>
-                    <h4 className={`font-bold text-sm ${isSlotCancelled ? 'text-slate-400 line-through' : 'text-white'}`}>
+                  <div className="min-w-0">
+                    <h4 className={`font-bold text-sm truncate ${isSlotCancelled ? 'text-slate-400 line-through' : 'text-white'}`}>
                       {slot.dayName} {formatShortFRDate(slot.dateStr)}
                     </h4>
                     <span className="text-xs text-indigo-300 font-mono font-medium">
@@ -313,24 +313,24 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                 </div>
 
                 {isSlotCancelled ? (
-                  <span className="text-[11px] bg-red-950/70 border border-red-800/60 text-red-300 px-2.5 py-1 rounded-lg self-start sm:self-auto">
+                  <span className="text-[11px] bg-red-950/70 border border-red-800/60 text-red-300 px-2.5 py-1 rounded-lg">
                     Annulé — {slot.cancelReason || 'Créneau indisponible'}
                   </span>
                 ) : (
-                  <span className="text-[11px] text-slate-400 bg-slate-950/70 border border-slate-800 px-2.5 py-1 rounded-lg flex items-center gap-1 self-start sm:self-auto">
+                  <span className="text-[11px] text-slate-400 bg-slate-950/70 border border-slate-800 px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0">
                     <Users className="w-3 h-3 text-slate-400" />
                     {slotMin}–{slotMax} joueurs
                   </span>
                 )}
               </div>
 
-              {/* 3 Action Buttons */}
+              {/* 3 Action Buttons (Touch-friendly) */}
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'DISPONIBLE')}
-                  className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`min-h-[48px] py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'DISPONIBLE'
                       ? 'bg-emerald-600 border-emerald-400 text-white shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-300'
@@ -344,7 +344,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                   type="button"
                   disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'INCERTAIN')}
-                  className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`min-h-[48px] py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'INCERTAIN'
                       ? 'bg-amber-600 border-amber-400 text-white shadow-lg shadow-amber-600/30 ring-2 ring-amber-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-amber-500/40 hover:text-amber-300'
@@ -358,7 +358,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
                   type="button"
                   disabled={isClosed || isSlotCancelled}
                   onClick={() => handleVoteChange(slot.id, 'INDISPONIBLE')}
-                  className={`py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`min-h-[48px] py-2.5 px-2 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition border active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
                     currentVote === 'INDISPONIBLE'
                       ? 'bg-red-600 border-red-400 text-white shadow-lg shadow-red-600/30 ring-2 ring-red-500/30'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-red-500/40 hover:text-red-300'
@@ -373,24 +373,13 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
         })}
       </div>
 
-      {/* Save Button Floating or Bottom */}
-      <div
-        className={`sticky bottom-4 md:bottom-6 backdrop-blur-md p-4 rounded-2xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xl transition ${
-          saveError || hasUnsavedChanges
-            ? 'bg-red-950/90 border-red-500/70'
-            : 'bg-slate-950/90 border-slate-800'
-        }`}
-      >
+      {/* Save Bar (positionnée au-dessus de la barre mobile) */}
+      <div className="sticky bottom-[72px] sm:bottom-6 z-30 bg-slate-950/95 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xl">
         <div className="flex items-center gap-2">
           {saveError ? (
-            <span className="text-xs text-red-200 font-medium flex items-center gap-1.5">
-              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+            <span className="text-xs text-red-400 font-medium flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
               {saveError}
-            </span>
-          ) : hasUnsavedChanges ? (
-            <span className="text-xs text-red-200 font-semibold flex items-center gap-1.5">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              Modifications non sauvegardées ! Cliquez sur « Enregistrer » pour valider vos réponses.
             </span>
           ) : savedSuccess ? (
             <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
@@ -400,7 +389,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
           ) : (
             <span className="text-xs text-slate-400 flex items-center gap-1.5">
               <AlertCircle className="w-4 h-4 text-indigo-400 shrink-0" />
-              {isClosed ? 'Votes verrouillés' : 'Vos réponses sont à jour'}
+              {isClosed ? 'Votes verrouillés' : "Pensez à enregistrer vos choix"}
             </span>
           )}
         </div>
@@ -409,11 +398,7 @@ export const MemberVoteScreen: React.FC<MemberVoteScreenProps> = ({
           type="button"
           onClick={handleSave}
           disabled={isClosed || isSaving}
-          className={`font-semibold text-xs py-2.5 px-6 rounded-xl transition flex items-center justify-center gap-2 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-            hasUnsavedChanges
-              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 ring-2 ring-emerald-400/40'
-              : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
-          }`}
+          className="w-full sm:w-auto min-h-[44px] bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs py-2.5 px-6 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 active:scale-95"
         >
           {isSaving ? (
             <>
