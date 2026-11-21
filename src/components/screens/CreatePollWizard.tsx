@@ -409,23 +409,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
     markDirty();
   };
 
-  const updateSlotParticipants = (
-    dayIndex: number,
-    slotIndex: number,
-    field: 'minParticipants' | 'maxParticipants',
-    value: number
-  ) => {
-    setDays((prev) => {
-      const copy = [...prev];
-      const target = copy[dayIndex];
-      const newSlots = [...target.slots];
-      newSlots[slotIndex] = { ...newSlots[slotIndex], [field]: value };
-      copy[dayIndex] = { ...target, slots: newSlots };
-      return copy;
-    });
-    markDirty();
-  };
-
   // Appliquer un Min ou Max à tous les créneaux d'un jour donné
   const applyDayParticipants = (
     dayIndex: number,
@@ -439,22 +422,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
         ...target,
         slots: target.slots.map((s) => ({ ...s, [field]: value })),
       };
-      return copy;
-    });
-    markDirty();
-  };
-
-  const updateSlotTrainingType = (
-    dayIndex: number,
-    slotIndex: number,
-    value: TrainingType
-  ) => {
-    setDays((prev) => {
-      const copy = [...prev];
-      const target = copy[dayIndex];
-      const newSlots = [...target.slots];
-      newSlots[slotIndex] = { ...newSlots[slotIndex], trainingType: value };
-      copy[dayIndex] = { ...target, slots: newSlots };
       return copy;
     });
     markDirty();
@@ -920,7 +887,7 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                   Étape 2 : Profils, Types, Créneaux & Capacités
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Chargez un profil pré-enregistré ou réglez librement les types de session (MIX, SCRIM, ASTT, Entraînement), horaires et min/max de joueurs par jour ou créneau.
+                  Chargez un profil pré-enregistré ou réglez le type de session (MIX, SCRIM, ASTT, Entraînement), le min/max et les horaires de chaque jour.
                 </p>
               </div>
 
@@ -1154,28 +1121,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
 
                             <div className="flex flex-wrap items-center gap-2">
                               <div className="flex items-center gap-1.5">
-                                <span className="text-[11px] text-slate-400">Type</span>
-                                <select
-                                  value={slot.trainingType}
-                                  onChange={(e) =>
-                                    updateSlotTrainingType(
-                                      dayIdx,
-                                      slotIdx,
-                                      e.target.value as TrainingType
-                                    )
-                                  }
-                                  className={`rounded-lg px-2 py-1.5 text-xs font-semibold border focus:outline-none focus:border-indigo-500 bg-slate-950 ${TRAINING_TYPE_BADGE_CLASSES[slot.trainingType]}`}
-                                  aria-label="Type de session du créneau"
-                                >
-                                  {TRAINING_TYPES.map((t) => (
-                                    <option key={t} value={t} className="bg-slate-950 text-white">
-                                      {TRAINING_TYPE_LABELS[t]}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              <div className="flex items-center gap-1.5">
                                 <span className="text-[11px] text-slate-400">De</span>
                                 <input
                                   type="time"
@@ -1198,45 +1143,6 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                                   className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                                 />
                               </div>
-                            </div>
-
-                            <div className="flex items-center justify-between sm:justify-start gap-2 bg-slate-950/80 border border-slate-800 px-2.5 py-1.5 rounded-lg">
-                              <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
-                                <span className="text-slate-400">Min</span>
-                                <input
-                                  type="number"
-                                  min={2}
-                                  max={20}
-                                  value={slot.minParticipants}
-                                  onChange={(e) =>
-                                    updateSlotParticipants(
-                                      dayIdx,
-                                      slotIdx,
-                                      'minParticipants',
-                                      parseInt(e.target.value, 10) || 2
-                                    )
-                                  }
-                                  className="w-12 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
-                                />
-                              </label>
-                              <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
-                                <span className="text-slate-400">Max</span>
-                                <input
-                                  type="number"
-                                  min={2}
-                                  max={20}
-                                  value={slot.maxParticipants}
-                                  onChange={(e) =>
-                                    updateSlotParticipants(
-                                      dayIdx,
-                                      slotIdx,
-                                      'maxParticipants',
-                                      parseInt(e.target.value, 10) || 8
-                                    )
-                                  }
-                                  className="w-12 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
-                                />
-                              </label>
                             </div>
 
                             <span className="text-[10px] text-slate-400">

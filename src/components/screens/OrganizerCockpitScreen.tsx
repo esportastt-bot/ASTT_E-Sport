@@ -12,7 +12,7 @@ import {
   Trophy, AlertTriangle, CheckCircle, Clock,
   ChevronDown, UserMinus, UserCheck, Shield, ArrowLeft,
   Sparkles, Loader2, X, Users, Calendar, Ban, Trash2,
-  Plus, Settings, Copy, Check, Lock, Eye, Pencil, RotateCcw,
+  Plus, Copy, Check, Lock, Eye, Pencil, RotateCcw,
   Split, Send
 } from 'lucide-react';
 import { UserAvatar } from '../UserAvatar';
@@ -77,16 +77,6 @@ interface OrganizerCockpitScreenProps {
     }
   ) => Promise<string>;
   onRemoveSlot: (pollId: string, slotId: string) => Promise<void>;
-  onUpdatePoll: (
-    pollId: string,
-    changes: Partial<{
-      title: string;
-      deadline: string;
-      minParticipants: number;
-      maxParticipants: number;
-      status: 'OPEN' | 'CLOSED' | 'CANCELLED';
-    }>
-  ) => Promise<void>;
   onCreatePoll: () => void;
   onBack?: () => void;
 }
@@ -118,17 +108,6 @@ function getFrenchDayName(dateStr: string): string {
   return FR_WEEKDAYS[d.getDay()] || 'Jour';
 }
 
-function toLocalDateAndTime(isoString: string): { date: string; time: string } {
-  const d = new Date(isoString);
-  if (Number.isNaN(d.getTime())) return { date: '', time: '20:00' };
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return { date: `${y}-${m}-${day}`, time: `${hh}:${mm}` };
-}
-
 export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   polls,
   selectedPollId,
@@ -142,7 +121,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   onSaveSlotPlanBatch,
   onAddSlot,
   onRemoveSlot,
-  onUpdatePoll,
   onCreatePoll,
   onBack,
 }) => {
@@ -181,18 +159,11 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   const [newSlotType, setNewSlotType] = useState<TrainingType>('ASTT');
   const [addingSlot, setAddingSlot] = useState(false);
 
-  const [showQuickSettings, setShowQuickSettings] = useState(false);
-  const [settingsMin, setSettingsMin] = useState<number>(4);
-  const [settingsMax, setSettingsMax] = useState<number>(8);
-  const [settingsDeadlineDate, setSettingsDeadlineDate] = useState('');
-  const [settingsDeadlineTime, setSettingsDeadlineTime] = useState('20:00');
-  const [savingSettings, setSavingSettings] = useState(false);
-
   const [cancellingSlotId, setCancellingSlotId] = useState<string | null>(null);
   const [cancelReasonInput, setCancelReasonInput] = useState('Salle de jeu indisponible');
   const [confirmDeleteSlotId, setConfirmDeleteSlotId] = useState<string | null>(null);
 
-  const [copiedType, setCopiedType] = useState<'discord' | 'reminders' | null>(null);
+  const [copiedType, setCopiedType] = useState<'reminders' | null>(null);
 
   // Modales MP Discord (Planning décidé & Relance retardataires)
   const [showPlanningDmModal, setShowPlanningDmModal] = useState(false);
@@ -315,10 +286,15 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   });
 
   const assignedInThisPoll: Record<string, number> = {};
+  const confirmedAssignedInThisPoll: Record<string, number> = {};
   for (const s of resolvedSlots) {
     if (s.cancelled) continue;
+    const isConfirmedSession = s.selectedIds.length >= s.minParticipants;
     for (const uid of s.selectedIds) {
       assignedInThisPoll[uid] = (assignedInThisPoll[uid] || 0) + 1;
+      if (isConfirmedSession) {
+        confirmedAssignedInThisPoll[uid] = (confirmedAssignedInThisPoll[uid] || 0) + 1;
+      }
     }
   }
 
@@ -373,7 +349,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     const desired = poll.desiredGamesByUser?.[uid];
     if (typeof desired === 'number' && desired > 0) {
       requestingCount++;
-      if ((assignedInThisPoll[uid] || 0) >= desired) satisfiedCount++;
+      if ((confirmedAssignedInThisPoll[uid] || 0) >= desired) satisfiedCount++;
     }
   }
 
@@ -710,103 +686,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }
   };
 
-  const openSettingsPanel = () => {
-    const dt = toLocalDateAndTime(poll.deadline);
-    setSettingsMin(poll.minParticipants);
-    setSettingsMax(poll.maxParticipants);
-    setSettingsDeadlineDate(dt.date);
-    setSettingsDeadlineTime(dt.time);
-    setShowQuickSettings((v) => !v);
-    setShowAddSlotForm(false);
-  };
-
-  const handleSaveQuickSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canEdit || savingSettings) return;
-    if (settingsMin > settingsMax) {
-      setActionError('Le minimum ne peut pas dépasser le maximum.');
-      return;
-    }
-    setSavingSettings(true);
-    setActionError(null);
-    try {
-      const changes: any = {
-        minParticipants: settingsMin,
-        maxParticipants: settingsMax,
-      };
-      if (settingsDeadlineDate && settingsDeadlineTime) {
-        changes.deadline = `${settingsDeadlineDate}T${settingsDeadlineTime}:00`;
-      }
-      await onUpdatePoll(poll.id, changes);
-      setShowQuickSettings(false);
-      showToast('Paramètres du sondage mis à jour.');
-    } catch (err: any) {
-      setActionError(err?.message || 'Impossible de mettre à jour les paramètres.');
-    } finally {
-      setSavingSettings(false);
-    }
-  };
-
-  const handleCopyDiscordSummary = async () => {
-    const slotsToExport = resolvedSlots
-      .filter(
-        (s) =>
-          !s.cancelled &&
-          (s.selectedIds.length > 0 || s.disponibles.length >= s.minParticipants)
-      )
-      .sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.startTime.localeCompare(b.startTime));
-
-    const targetList = slotsToExport.length > 0 ? slotsToExport : activeSlots;
-    const distinctTypes = Array.from(
-      new Set(targetList.map((s) => TRAINING_TYPE_LABELS[s.trainingType || poll.type]))
-    );
-    const lines: string[] = [
-      `📅 **${poll.title}**${distinctTypes.length > 0 ? ` (${distinctTypes.join(' / ')})` : ''}`,
-      '',
-    ];
-
-    for (const s of targetList) {
-      const slotTypeLabel = TRAINING_TYPE_LABELS[s.trainingType || poll.type] || poll.type;
-      lines.push(
-        `**• [${slotTypeLabel}] ${s.dayName} ${formatShortFRDate(s.dateStr)} — ${s.startTime} à ${s.endTime}**`
-      );
-      if (s.selectedIds.length > 0) {
-        const teamA = s.selectedIds.filter((id) => s.teamAssignments[id] === 'A');
-        const teamB = s.selectedIds.filter((id) => s.teamAssignments[id] === 'B');
-        const unassignedTeam = s.selectedIds.filter((id) => !s.teamAssignments[id]);
-
-        if (teamA.length > 0 || teamB.length > 0) {
-          if (teamA.length > 0) {
-            lines.push(`  🟦 Équipe A : ${teamA.map((id) => getUserInfo(id).name).join(', ')}`);
-          }
-          if (teamB.length > 0) {
-            lines.push(`  🟥 Équipe B : ${teamB.map((id) => getUserInfo(id).name).join(', ')}`);
-          }
-          if (unassignedTeam.length > 0) {
-            lines.push(`  ✅ Titulaires : ${unassignedTeam.map((id) => getUserInfo(id).name).join(', ')}`);
-          }
-        } else {
-          lines.push(`  ✅ Titulaires (${s.selectedIds.length}) : ${s.selectedIds.map((id) => getUserInfo(id).name).join(', ')}`);
-        }
-      } else {
-        lines.push(`  🟢 Disponibles (${s.disponibles.length}) : ${s.disponibles.map((id) => getUserInfo(id).name).join(', ') || 'Aucun'}`);
-      }
-
-      if (s.waitlistIds.length > 0) {
-        lines.push(`  ⏳ Liste d'attente : ${s.waitlistIds.map((id) => getUserInfo(id).name).join(', ')}`);
-      }
-      lines.push('');
-    }
-
-    try {
-      await navigator.clipboard.writeText(lines.join('\n').trim());
-      setCopiedType('discord');
-      setTimeout(() => setCopiedType((v) => (v === 'discord' ? null : v)), 2500);
-    } catch {
-      window.prompt('Copiez ce résumé Discord :', lines.join('\n'));
-    }
-  };
-
   const handleCopyReminders = async () => {
     if (missingResponders.length === 0) return;
     const mentions = missingResponders.map((id) => `<@${id}>`).join(' ');
@@ -1016,12 +895,12 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
           <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 space-y-1">
             <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
               <Trophy className="w-3.5 h-3.5 text-indigo-300" />
-              Souhaits couverts
+              Objectifs parties
             </p>
             <p className="text-lg font-bold text-white">
               {satisfiedCount} / {requestingCount}
             </p>
-            <p className="text-[10px] text-slate-400">Objectifs de parties atteints</p>
+            <p className="text-[10px] text-slate-400">Membres satisfaits (créneaux ≥ min)</p>
           </div>
         </div>
 
@@ -1042,7 +921,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                 type="button"
                 onClick={() => {
                   setShowAddSlotForm((v) => !v);
-                  setShowQuickSettings(false);
                   if (!newSlotDate) setNewSlotDate(poll.startDate || '');
                   setNewSlotMin(poll.minParticipants);
                   setNewSlotMax(poll.maxParticipants);
@@ -1053,31 +931,8 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                 <Plus className="w-3.5 h-3.5 text-indigo-400" />
                 <span>Ajouter un créneau</span>
               </button>
-
-              <button
-                type="button"
-                onClick={openSettingsPanel}
-                className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
-              >
-                <Settings className="w-3.5 h-3.5 text-slate-300" />
-                <span>Paramètres</span>
-              </button>
             </>
           )}
-
-          <button
-            type="button"
-            onClick={handleCopyDiscordSummary}
-            title="Copie un résumé prêt à coller (Ctrl+V) dans un salon Discord avec les créneaux, titulaires et équipes"
-            className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
-          >
-            {copiedType === 'discord' ? (
-              <Check className="w-3.5 h-3.5 text-emerald-400" />
-            ) : (
-              <Copy className="w-3.5 h-3.5 text-indigo-400" />
-            )}
-            <span>{copiedType === 'discord' ? 'Planning copié !' : 'Copier le planning Discord'}</span>
-          </button>
 
           {canEdit && (
             <button
@@ -1210,89 +1065,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
               {addingSlot && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               <span>Ajouter</span>
             </button>
-          </form>
-        )}
-
-        {/* Panneau Paramètres rapides */}
-        {canEdit && showQuickSettings && (
-          <form
-            onSubmit={handleSaveQuickSettings}
-            className="bg-slate-950 border border-slate-700 rounded-xl p-4 space-y-3 text-xs animate-fade-slide-up"
-          >
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="space-y-1">
-                <label className="text-slate-400 block">Min. par défaut</label>
-                <input
-                  type="number"
-                  min={2}
-                  max={20}
-                  value={settingsMin}
-                  onChange={(e) => setSettingsMin(parseInt(e.target.value, 10) || 4)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-400 block">Max. par défaut</label>
-                <input
-                  type="number"
-                  min={2}
-                  max={20}
-                  value={settingsMax}
-                  onChange={(e) => setSettingsMax(parseInt(e.target.value, 10) || 8)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-400 block">Date clôture</label>
-                <input
-                  type="date"
-                  value={settingsDeadlineDate}
-                  onChange={(e) => setSettingsDeadlineDate(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-400 block">Heure clôture</label>
-                <input
-                  type="time"
-                  value={settingsDeadlineTime}
-                  onChange={(e) => setSettingsDeadlineTime(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
-                />
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
-              <div className="flex items-center gap-2">
-                {poll.status === 'OPEN' ? (
-                  <button
-                    type="button"
-                    onClick={() => onUpdatePoll(poll.id, { status: 'CLOSED' })}
-                    className="bg-slate-800 hover:bg-slate-700 text-amber-300 px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1"
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    Clôturer les votes
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onUpdatePoll(poll.id, { status: 'OPEN' })}
-                    className="bg-indigo-950 hover:bg-indigo-900 text-indigo-300 px-3 py-1.5 rounded-lg border border-indigo-700 flex items-center gap-1"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Rouvrir le sondage
-                  </button>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                disabled={savingSettings}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 rounded-lg flex items-center gap-1.5"
-              >
-                {savingSettings && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>Appliquer</span>
-              </button>
-            </div>
           </form>
         )}
       </div>
