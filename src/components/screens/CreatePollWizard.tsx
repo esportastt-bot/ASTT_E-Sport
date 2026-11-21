@@ -824,14 +824,14 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                     <ChevronLeft className="w-4 h-4" />
                   </button>
 
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm sm:text-base font-bold text-white truncate">
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 min-w-0">
+                    <span className="text-sm sm:text-base font-bold text-white whitespace-nowrap">
                       {MONTHS_FR[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
                     </span>
                     <button
                       type="button"
                       onClick={() => applyWeekMonday(getMonday(new Date()))}
-                      className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500/60 text-slate-200 transition shrink-0"
+                      className="text-[11px] font-medium px-2.5 py-0.5 sm:py-1 rounded-lg bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500/60 text-slate-200 transition shrink-0"
                     >
                       Aujourd&apos;hui
                     </button>
@@ -917,10 +917,10 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
               <div>
                 <h3 className="text-base font-semibold text-white flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-indigo-400" />
-                  Étape 2 : Profils, Créneaux & Capacités par jour / créneau
+                  Étape 2 : Profils, Types, Créneaux & Capacités
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Chargez un profil pré-enregistré ou réglez librement les horaires et le min/max de joueurs par jour ou créneau individuel.
+                  Chargez un profil pré-enregistré ou réglez librement les types de session (MIX, SCRIM, ASTT, Entraînement), horaires et min/max de joueurs par jour ou créneau.
                 </p>
               </div>
 
