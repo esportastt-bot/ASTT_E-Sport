@@ -56,64 +56,62 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Actions droite */}
           <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-            {/* Boutons Desktop (cachés sur très petit écran, remplacés par barre basse mobile) */}
-            <div className="hidden sm:flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setScreen('hub')}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
-                  currentScreen === 'hub'
-                    ? 'bg-slate-700 border-slate-500 text-white shadow'
-                    : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
-                }`}
-                title="Page de lancement"
-              >
-                <Home className="w-3.5 h-3.5" />
-                <span>Accueil</span>
-              </button>
+            {/* Boutons Desktop (cachés sur la page de lancement et sur très petit écran) */}
+            {currentScreen !== 'hub' && (
+              <div className="hidden sm:flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScreen('hub')}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200"
+                  title="Page de lancement"
+                >
+                  <Home className="w-3.5 h-3.5" />
+                  <span>Accueil</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setScreen('dashboard')}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
-                  isPollsSection
-                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/20'
-                    : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
-                }`}
-                title="Sondages de disponibilités"
-              >
-                <CalendarCheck2 className="w-3.5 h-3.5" />
-                <span>Sondages</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setScreen('dashboard')}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
+                    isPollsSection
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/20'
+                      : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
+                  }`}
+                  title="Sondages de disponibilités"
+                >
+                  <CalendarCheck2 className="w-3.5 h-3.5" />
+                  <span>Sondages</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setScreen('cockpit')}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
-                  currentScreen === 'cockpit'
-                    ? 'bg-emerald-600 border-emerald-500 text-white shadow-md shadow-emerald-600/20'
-                    : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
-                }`}
-                title="Vue d'ensemble et pilotage des sessions"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                <span>Pilotage</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setScreen('cockpit')}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
+                    currentScreen === 'cockpit'
+                      ? 'bg-emerald-600 border-emerald-500 text-white shadow-md shadow-emerald-600/20'
+                      : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
+                  }`}
+                  title="Vue d'ensemble et pilotage des sessions"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>Pilotage</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setScreen('matchmaking')}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
-                  currentScreen === 'matchmaking'
-                    ? 'bg-teal-600 border-teal-500 text-white shadow-md shadow-teal-600/20'
-                    : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
-                }`}
-                title="Créer un post Matchmaking sur le forum Discord"
-              >
-                <Gamepad2 className="w-3.5 h-3.5" />
-                <span>Matchmaking</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setScreen('matchmaking')}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
+                    currentScreen === 'matchmaking'
+                      ? 'bg-teal-600 border-teal-500 text-white shadow-md shadow-teal-600/20'
+                      : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
+                  }`}
+                  title="Créer un post Matchmaking sur le forum Discord"
+                >
+                  <Gamepad2 className="w-3.5 h-3.5" />
+                  <span>Matchmaking</span>
+                </button>
+              </div>
+            )}
 
             {/* Profil utilisateur connecté */}
             <div className="flex items-center gap-2 bg-slate-950/60 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs">
@@ -145,26 +143,19 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* Barre de navigation basse mobile (< 640px) */}
-      <nav
-        aria-label="Navigation principale mobile"
-        className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 pb-safe shadow-2xl"
-      >
+      {/* Barre de navigation basse mobile (< 640px, masquée sur la page de lancement) */}
+      {currentScreen !== 'hub' && (
+        <nav
+          aria-label="Navigation principale mobile"
+          className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 pb-safe shadow-2xl"
+        >
         <div className="grid grid-cols-4 h-16 px-1.5 gap-1">
           <button
             type="button"
             onClick={() => setScreen('hub')}
-            className={`flex flex-col items-center justify-center gap-1 rounded-xl transition active:scale-95 ${
-              currentScreen === 'hub'
-                ? 'text-white bg-slate-800/80'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
+            className="flex flex-col items-center justify-center gap-1 rounded-xl transition active:scale-95 text-slate-400 hover:text-slate-200"
           >
-            <Home
-              className={`w-5 h-5 transition-transform duration-200 ${
-                currentScreen === 'hub' ? '-translate-y-0.5 text-indigo-400' : ''
-              }`}
-            />
+            <Home className="w-5 h-5 transition-transform duration-200" />
             <span className="text-[10px] font-semibold leading-none">Accueil</span>
           </button>
 
@@ -220,6 +211,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       </nav>
+      )}
     </>
   );
 };

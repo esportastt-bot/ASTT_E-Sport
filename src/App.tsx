@@ -201,12 +201,9 @@ export function App() {
 
             {effectiveScreen === 'hub' && userProfile && (
               <HomeHubScreen
-                currentUser={userProfile}
                 polls={polls}
                 loadingPolls={pollsLoading}
                 onOpenPolls={() => navigateTo('dashboard')}
-                onCreatePoll={() => navigateTo('create')}
-                onOpenCockpit={() => navigateTo('cockpit')}
                 onOpenMatchmaking={() => navigateTo('matchmaking')}
               />
             )}

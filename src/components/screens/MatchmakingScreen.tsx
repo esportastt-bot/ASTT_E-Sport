@@ -91,9 +91,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   const [time1, setTime1] = useState<string>('20:30');
   const [hasSecondTime, setHasSecondTime] = useState<boolean>(false);
   const [time2, setTime2] = useState<string>('21:10');
-  const [announceGeneral, setAnnounceGeneral] = useState<boolean>(
-    initialTeam.toUpperCase() === 'ASTT'
-  );
+  const [announceGeneral, setAnnounceGeneral] = useState<boolean>(true);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,13 +99,10 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
   const handleSelectTeamPreset = (teamName: string) => {
     setEquipe(teamName);
-    setAnnounceGeneral(teamName.toUpperCase() === 'ASTT');
   };
 
   const handleEquipeChange = (val: string) => {
     setEquipe(val);
-    const cleaned = (val.trim() || 'ASTT').toUpperCase();
-    setAnnounceGeneral(cleaned === 'ASTT');
   };
 
   const previewTitle = useMemo(() => {
@@ -399,7 +394,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
                 Annoncer dans le salon général (@everyone)
               </span>
               <span className="block text-[11px] text-slate-400">
-                Coché automatiquement lorsque l&apos;équipe est ASTT.
+                Activé par défaut — décochez pour publier uniquement dans le forum.
               </span>
             </span>
           </label>
