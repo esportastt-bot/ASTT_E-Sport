@@ -6,6 +6,7 @@ import type { ResponseStatus } from './types';
 import { notifyPollCreatedByDiscord } from './firebase/discordNotifications';
 import { Navbar, type AppScreen } from './components/Navbar';
 import { LoginScreen } from './components/screens/LoginScreen';
+import { HomeHubScreen } from './components/screens/HomeHubScreen';
 import {
   DashboardScreen,
   type DashboardNotificationBanner,
@@ -13,6 +14,7 @@ import {
 import { CreatePollWizard } from './components/screens/CreatePollWizard';
 import { MemberVoteScreen } from './components/screens/MemberVoteScreen';
 import { OrganizerCockpitScreen } from './components/screens/OrganizerCockpitScreen';
+import { MatchmakingScreen } from './components/screens/MatchmakingScreen';
 import bgFond from './assets/fond.webp';
 
 export function App() {
@@ -35,7 +37,7 @@ export function App() {
     removeSlot,
   } = usePolls();
 
-  const [currentScreen, setCurrentScreen] = useState<AppScreen>('dashboard');
+  const [currentScreen, setCurrentScreen] = useState<AppScreen>('hub');
   const [selectedPollId, setSelectedPollId] = useState<string | null>(null);
   const [deepLinkPollId, setDeepLinkPollId] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -68,7 +70,7 @@ export function App() {
     : deepLinkMatch
     ? 'vote'
     : currentScreen === 'login'
-    ? 'dashboard'
+    ? 'hub'
     : currentScreen;
 
   const activePoll = polls.find((p) => p.id === effectivePollId) || polls[0] || null;
@@ -196,6 +198,25 @@ export function App() {
         ) : (
           <div key={effectiveScreen} className="w-full animate-fade-slide-up">
             {effectiveScreen === 'login' && <LoginScreen />}
+
+            {effectiveScreen === 'hub' && userProfile && (
+              <HomeHubScreen
+                currentUser={userProfile}
+                polls={polls}
+                loadingPolls={pollsLoading}
+                onOpenPolls={() => navigateTo('dashboard')}
+                onCreatePoll={() => navigateTo('create')}
+                onOpenCockpit={() => navigateTo('cockpit')}
+                onOpenMatchmaking={() => navigateTo('matchmaking')}
+              />
+            )}
+
+            {effectiveScreen === 'matchmaking' && userProfile && (
+              <MatchmakingScreen
+                currentUser={userProfile}
+                onBack={() => navigateTo('hub')}
+              />
+            )}
 
             {effectiveScreen === 'dashboard' && userProfile && (
               <DashboardScreen

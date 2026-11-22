@@ -6,6 +6,9 @@ import {
   getAllGuildMembers,
   getAvatarUrl,
   sendDirectMessage,
+  createForumThread,
+  addMessageReaction,
+  sendChannelMessage,
   DiscordExchangeError,
   type DiscordEmbed,
   type DiscordEmbedField,
@@ -29,6 +32,8 @@ export interface Env {
   DISCORD_OWNER_ID?: string;
   DISCORD_ADMIN_ROLE_IDS?: string;
   DISCORD_CAPTAIN_ROLE_IDS?: string;
+  DISCORD_FORUM_CHANNEL_ID?: string;
+  DISCORD_GENERAL_CHANNEL_ID?: string;
   FRONTEND_URL: string;
 }
 
@@ -318,6 +323,161 @@ export default {
             discordDmConfigured: Boolean(
               env.DISCORD_BOT_TOKEN && env.FIREBASE_SERVICE_ACCOUNT_JSON
             ),
+            matchmakingConfigured: Boolean(
+              env.DISCORD_BOT_TOKEN && env.DISCORD_FORUM_CHANNEL_ID
+            ),
+          },
+          200,
+          corsHeaders
+        );
+      }
+
+      // ── Création d'un post Matchmaking dans le forum Discord ─────────────
+      if (url.pathname === '/api/discord/matchmaking/create' && request.method === 'POST') {
+        let caller: { uid: string; isAdmin: boolean; displayName: string };
+        try {
+          caller = await authenticateCaller(request, env);
+        } catch (authErr) {
+          console.warn('[Matchmaking Auth Error]', authErr);
+          return jsonResponse({ error: 'unauthorized' }, 401, corsHeaders);
+        }
+
+        if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_FORUM_CHANNEL_ID) {
+          return jsonResponse({ error: 'matchmaking_unavailable' }, 503, corsHeaders);
+        }
+
+        let body: {
+          equipe?: string;
+          level?: string;
+          arena?: string;
+          date?: string;
+          times?: string[];
+          announceGeneral?: boolean;
+        } = {};
+        try {
+          body = (await request.json()) as typeof body;
+        } catch {
+          return jsonResponse({ error: 'invalid_json' }, 400, corsHeaders);
+        }
+
+        const equipe = String(body.equipe || '').trim().slice(0, 30) || 'ASTT';
+        const rawLevel = String(body.level || '').trim();
+        const LEVEL_EMOJIS: Record<string, string> = {
+          'Débutant': '🟢',
+          'Intermédiaire': '🟡',
+          'Confirmé': '🔴',
+        };
+        const level = rawLevel in LEVEL_EMOJIS ? rawLevel : 'Débutant';
+        const emoji = LEVEL_EMOJIS[level] || '❓';
+
+        const arena = String(body.arena || '').trim().slice(0, 30);
+        if (!arena) {
+          return jsonResponse({ error: 'missing_arena', message: 'Veuillez préciser une arène.' }, 400, corsHeaders);
+        }
+
+        const dateIso = String(body.date || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) {
+          return jsonResponse({ error: 'invalid_date', message: 'Date invalide.' }, 400, corsHeaders);
+        }
+        const dateFr = formatFrDate(dateIso);
+
+        const rawTimes = Array.isArray(body.times) ? body.times : [];
+        const times = rawTimes
+          .map(t => String(t || '').trim())
+          .filter(t => /^\d{2}:\d{2}$/.test(t))
+          .slice(0, 2);
+        if (times.length === 0) {
+          return jsonResponse(
+            { error: 'invalid_times', message: 'Indiquez au moins un créneau horaire (HH:MM).' },
+            400,
+            corsHeaders
+          );
+        }
+
+        // Vérifier que la date n'est pas antérieure à aujourd'hui (heure de Paris)
+        const todayParis = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Europe/Paris',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date());
+        if (dateIso < todayParis) {
+          return jsonResponse(
+            { error: 'date_in_past', message: 'La date sélectionnée est dans le passé.' },
+            400,
+            corsHeaders
+          );
+        }
+
+        const timesDisplay = times.join(' ou ');
+        const threadTitle = `» ${equipe} - ${arena} - ${dateFr} à ${timesDisplay}`;
+        const evaUrl = `https://app.eva.gg/fr-FR/booking?locationId=36&gameId=1&currentDate=${dateIso}`;
+
+        let msg = `# 🎮 Session de Jeu — ${level} ${emoji}\n\n`;
+        msg += `## 📋 Informations\n`;
+        msg += `**Équipe** : ${equipe} | **Niveau** : ${level} ${emoji}\n`;
+        msg += `**Arène** : ${arena} | **Date** : ${dateFr}\n`;
+        msg += `**Organisateur** : <@${caller.uid}>\n\n`;
+        if (times.length === 1) {
+          msg += `**Heure** : ${times[0]}\n`;
+        } else {
+          msg +=
+            `**Créneaux** :\n` +
+            times.map((t, i) => `• Créneau ${i + 1} : ${t}`).join('\n') +
+            `\n`;
+        }
+        msg +=
+          `\n## 🔗 Réservation EVA\n` +
+          `[➤ Vérifiez et réservez sur EVA.gg](${evaUrl})\n` +
+          `*Pensez à réserver rapidement !*\n\n` +
+          `## 💬 Comment participer ?\n` +
+          `• ✅ **Je participe** — Confirmer\n` +
+          `• ❌ **Je ne peux pas** — Signaler votre absence\n` +
+          `• ❓ **Peut-être** — Vous hésitez\n\n` +
+          `**Bonne session ! 🎯**`;
+
+        const { threadId, messageId } = await createForumThread(
+          env.DISCORD_BOT_TOKEN,
+          env.DISCORD_FORUM_CHANNEL_ID,
+          threadTitle,
+          msg,
+          4320
+        );
+
+        await addMessageReaction(env.DISCORD_BOT_TOKEN, threadId, messageId, '✅');
+
+        const threadUrl = `https://discord.com/channels/${env.DISCORD_GUILD_ID}/${threadId}`;
+        let announcedGeneral = false;
+        let announceError: string | null = null;
+
+        if (body.announceGeneral && env.DISCORD_GENERAL_CHANNEL_ID) {
+          try {
+            const generalText =
+              `@everyone\n\n🎮 **Nouvelle session de jeu !**\n\n` +
+              `**Équipe** : ${equipe} | **Niveau** : ${level} ${emoji}\n` +
+              `**Arène** : ${arena} | **Date** : ${dateFr} à ${timesDisplay}\n` +
+              `**Organisateur** : <@${caller.uid}>\n\n` +
+              `[➤ Rejoindre la session](${threadUrl})`;
+            await sendChannelMessage(
+              env.DISCORD_BOT_TOKEN,
+              env.DISCORD_GENERAL_CHANNEL_ID,
+              generalText
+            );
+            announcedGeneral = true;
+          } catch (gErr: any) {
+            console.warn('[Matchmaking General Announce Error]', gErr);
+            announceError = String(gErr?.message || 'Annonce générale impossible');
+          }
+        }
+
+        return jsonResponse(
+          {
+            ok: true,
+            threadId,
+            threadUrl,
+            title: threadTitle,
+            announcedGeneral,
+            ...(announceError ? { announceError } : {}),
           },
           200,
           corsHeaders

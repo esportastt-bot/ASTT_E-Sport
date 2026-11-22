@@ -353,3 +353,82 @@ export async function sendDirectMessage(
     };
   }
 }
+
+/** Crée un post (thread) dans un salon Forum Discord */
+export async function createForumThread(
+  botToken: string,
+  forumChannelId: string,
+  name: string,
+  content: string,
+  autoArchiveDuration = 4320
+): Promise<{ threadId: string; messageId: string }> {
+  const res = await discordBotFetchWithRetry(
+    `https://discord.com/api/v10/channels/${forumChannelId}/threads`,
+    botToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        name: name.slice(0, 100),
+        auto_archive_duration: autoArchiveDuration,
+        message: {
+          content: content.slice(0, 2000),
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Impossible de créer le post forum Discord (${res.status}): ${errText}`);
+  }
+
+  const data = (await res.json()) as { id?: string; message?: { id?: string } };
+  const threadId = String(data.id || '');
+  const messageId = String(data.message?.id || threadId);
+  if (!threadId) {
+    throw new Error('Réponse Discord invalide : identifiant de post manquant.');
+  }
+  return { threadId, messageId };
+}
+
+/** Ajoute une réaction emoji sur un message Discord (best-effort) */
+export async function addMessageReaction(
+  botToken: string,
+  channelId: string,
+  messageId: string,
+  emoji: string
+): Promise<void> {
+  const encoded = encodeURIComponent(emoji);
+  await discordBotFetchWithRetry(
+    `https://discord.com/api/v10/channels/${channelId}/messages/${messageId}/reactions/${encoded}/@me`,
+    botToken,
+    { method: 'PUT' }
+  ).catch(() => {});
+}
+
+/** Envoie un message dans un salon Discord */
+export async function sendChannelMessage(
+  botToken: string,
+  channelId: string,
+  content: string
+): Promise<{ messageId: string }> {
+  const res = await discordBotFetchWithRetry(
+    `https://discord.com/api/v10/channels/${channelId}/messages`,
+    botToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        content: content.slice(0, 2000),
+        allowed_mentions: { parse: ['everyone', 'users'] },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Impossible d'envoyer l'annonce dans le salon général (${res.status}): ${errText}`);
+  }
+
+  const data = (await res.json()) as { id?: string };
+  return { messageId: String(data.id || '') };
+}

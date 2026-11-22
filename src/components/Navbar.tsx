@@ -1,10 +1,17 @@
 import React from 'react';
 import type { UserProfile } from '../types';
-import { Home, PlusCircle, LogOut, SlidersHorizontal } from 'lucide-react';
+import { Home, CalendarCheck2, LogOut, SlidersHorizontal, Gamepad2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { UserAvatar } from './UserAvatar';
 
-export type AppScreen = 'login' | 'dashboard' | 'create' | 'vote' | 'cockpit';
+export type AppScreen =
+  | 'login'
+  | 'hub'
+  | 'dashboard'
+  | 'create'
+  | 'vote'
+  | 'cockpit'
+  | 'matchmaking';
 
 interface NavbarProps {
   currentScreen: AppScreen;
@@ -21,16 +28,18 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const { logout } = useAuth();
   const handleLogoutClick = onLogout || logout;
+  const isPollsSection =
+    currentScreen === 'dashboard' || currentScreen === 'create' || currentScreen === 'vote';
 
   return (
     <>
       <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-[1440px] w-full mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
-          {/* Brand - Clique pour revenir à l'accueil */}
+          {/* Brand - Clique pour revenir à la page de lancement */}
           <div
             className="flex items-center gap-2.5 sm:gap-3 cursor-pointer group min-w-0"
-            onClick={() => setScreen('dashboard')}
-            title="Retour à l'accueil"
+            onClick={() => setScreen('hub')}
+            title="Retour au menu principal"
           >
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-emerald-500 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition shrink-0">
               A
@@ -40,7 +49,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ASTT Planning
               </h1>
               <p className="text-[11px] sm:text-xs text-slate-400 truncate">
-                Disponibilités d'équipe
+                Sondages &amp; Matchmaking
               </p>
             </div>
           </div>
@@ -51,16 +60,30 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="hidden sm:flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setScreen('dashboard')}
+                onClick={() => setScreen('hub')}
                 className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
-                  currentScreen === 'dashboard'
+                  currentScreen === 'hub'
                     ? 'bg-slate-700 border-slate-500 text-white shadow'
                     : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
                 }`}
-                title="Retour à l'accueil"
+                title="Page de lancement"
               >
                 <Home className="w-3.5 h-3.5" />
                 <span>Accueil</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setScreen('dashboard')}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
+                  isPollsSection
+                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/20'
+                    : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
+                }`}
+                title="Sondages de disponibilités"
+              >
+                <CalendarCheck2 className="w-3.5 h-3.5" />
+                <span>Sondages</span>
               </button>
 
               <button
@@ -79,15 +102,16 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               <button
                 type="button"
-                onClick={() => setScreen('create')}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition shadow-md active:scale-95 ${
-                  currentScreen === 'create'
-                    ? 'bg-indigo-500 text-white shadow-indigo-500/30 ring-2 ring-indigo-400/40'
-                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/20'
+                onClick={() => setScreen('matchmaking')}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition border active:scale-95 ${
+                  currentScreen === 'matchmaking'
+                    ? 'bg-teal-600 border-teal-500 text-white shadow-md shadow-teal-600/20'
+                    : 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-200'
                 }`}
+                title="Créer un post Matchmaking sur le forum Discord"
               >
-                <PlusCircle className="w-3.5 h-3.5" />
-                <span>Créer sondage</span>
+                <Gamepad2 className="w-3.5 h-3.5" />
+                <span>Matchmaking</span>
               </button>
             </div>
 
@@ -126,22 +150,39 @@ export const Navbar: React.FC<NavbarProps> = ({
         aria-label="Navigation principale mobile"
         className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 pb-safe shadow-2xl"
       >
-        <div className="grid grid-cols-3 h-16 px-2 gap-1">
+        <div className="grid grid-cols-4 h-16 px-1.5 gap-1">
           <button
             type="button"
-            onClick={() => setScreen('dashboard')}
+            onClick={() => setScreen('hub')}
             className={`flex flex-col items-center justify-center gap-1 rounded-xl transition active:scale-95 ${
-              currentScreen === 'dashboard'
+              currentScreen === 'hub'
                 ? 'text-white bg-slate-800/80'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Home
               className={`w-5 h-5 transition-transform duration-200 ${
-                currentScreen === 'dashboard' ? '-translate-y-0.5 text-indigo-400' : ''
+                currentScreen === 'hub' ? '-translate-y-0.5 text-indigo-400' : ''
               }`}
             />
-            <span className="text-[11px] font-semibold leading-none">Accueil</span>
+            <span className="text-[10px] font-semibold leading-none">Accueil</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setScreen('dashboard')}
+            className={`flex flex-col items-center justify-center gap-1 rounded-xl transition active:scale-95 ${
+              isPollsSection
+                ? 'text-white bg-indigo-950/80'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <CalendarCheck2
+              className={`w-5 h-5 transition-transform duration-200 ${
+                isPollsSection ? '-translate-y-0.5 text-indigo-400' : ''
+              }`}
+            />
+            <span className="text-[10px] font-semibold leading-none">Sondages</span>
           </button>
 
           <button
@@ -158,24 +199,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                 currentScreen === 'cockpit' ? '-translate-y-0.5 text-emerald-400' : ''
               }`}
             />
-            <span className="text-[11px] font-semibold leading-none">Pilotage</span>
+            <span className="text-[10px] font-semibold leading-none">Pilotage</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setScreen('create')}
+            onClick={() => setScreen('matchmaking')}
             className={`flex flex-col items-center justify-center gap-1 rounded-xl transition active:scale-95 ${
-              currentScreen === 'create'
-                ? 'text-white bg-indigo-950/80'
+              currentScreen === 'matchmaking'
+                ? 'text-white bg-teal-950/80'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <PlusCircle
+            <Gamepad2
               className={`w-5 h-5 transition-transform duration-200 ${
-                currentScreen === 'create' ? '-translate-y-0.5 text-indigo-400' : ''
+                currentScreen === 'matchmaking' ? '-translate-y-0.5 text-teal-400' : ''
               }`}
             />
-            <span className="text-[11px] font-semibold leading-none">Créer</span>
+            <span className="text-[10px] font-semibold leading-none">Match</span>
           </button>
         </div>
       </nav>
