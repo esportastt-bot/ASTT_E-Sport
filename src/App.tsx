@@ -251,6 +251,9 @@ export function App() {
                 onSaveSlotPlanBatch={saveSlotPlanBatch}
                 onAddSlot={addSlot}
                 onRemoveSlot={removeSlot}
+                onUpdateTargetUsers={(pollId, targetUsers) =>
+                  updateExistingPoll(pollId, { targetUsers })
+                }
                 onCreatePoll={() => navigateTo('create')}
                 onBack={() => navigateTo('dashboard')}
               />

@@ -13,17 +13,17 @@ import {
   ChevronDown, UserMinus, UserCheck, Shield, ArrowLeft,
   Sparkles, Loader2, X, Users, Calendar, Ban, Trash2,
   Plus, Copy, Check, Lock, Eye, Pencil, RotateCcw,
-  Split, Send
+  Send, UserPlus, Search
 } from 'lucide-react';
 import { UserAvatar } from '../UserAvatar';
 import { formatFRDateTime, formatShortFRDate } from '../../utils/dateUtils';
 import {
   computeMonthlyAssignedCounts,
   generateOptimalSchedule,
-  splitIntoBalancedTeams,
   type ScheduleOptimizationResult,
 } from '../../utils/planningOptimizer';
 import {
+  notifyNewPollMembersByDiscord,
   notifyPlanningDecisionByDiscord,
   notifyPollRemindersByDiscord,
   type DiscordNotifyResult,
@@ -77,6 +77,7 @@ interface OrganizerCockpitScreenProps {
     }
   ) => Promise<string>;
   onRemoveSlot: (pollId: string, slotId: string) => Promise<void>;
+  onUpdateTargetUsers: (pollId: string, targetUsers: string[]) => Promise<void>;
   onCreatePoll: () => void;
   onBack?: () => void;
 }
@@ -121,6 +122,7 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   onSaveSlotPlanBatch,
   onAddSlot,
   onRemoveSlot,
+  onUpdateTargetUsers,
   onCreatePoll,
   onBack,
 }) => {
@@ -134,15 +136,22 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
   // Accordéon strict : 1 seul créneau déplié à la fois, tous repliés par défaut
   const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
-  const [voteTabBySlot, setVoteTabBySlot] = useState<
-    Record<string, 'dispo' | 'incertain' | 'indispo'>
-  >({});
 
   // Brouillons par créneau
   const [draftsBySlot, setDraftsBySlot] = useState<Record<string, SlotDraft>>({});
   const [optimizationBanner, setOptimizationBanner] =
     useState<ScheduleOptimizationResult['summary'] | null>(null);
+  const [proposedSchedule, setProposedSchedule] =
+    useState<ScheduleOptimizationResult | null>(null);
   const [pendingPollSwitchId, setPendingPollSwitchId] = useState<string | null>(null);
+
+  // Modale Ajouter / Supprimer des membres
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [draftTargetUserIds, setDraftTargetUserIds] = useState<string[]>([]);
+  const [membersSearch, setMembersSearch] = useState('');
+  const [notifyAddedMembers, setNotifyAddedMembers] = useState(true);
+  const [savingMembers, setSavingMembers] = useState(false);
+  const [membersModalError, setMembersModalError] = useState<string | null>(null);
 
   const [savingAll, setSavingAll] = useState(false);
   const [savingSlotId, setSavingSlotId] = useState<string | null>(null);
@@ -368,6 +377,9 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
   const switchPollNow = (targetId: string) => {
     setDraftsBySlot({});
     setOptimizationBanner(null);
+    setProposedSchedule(null);
+    setShowMembersModal(false);
+    setMembersModalError(null);
     setExpandedSlotId(null);
     setPendingPollSwitchId(null);
     setShowPlanningDmModal(false);
@@ -446,24 +458,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     });
   };
 
-  const cyclePlayerTeam = (slotId: string, userId: string) => {
-    updateSlotDraft(slotId, (cur) => {
-      const nextTeams = { ...cur.teamAssignments };
-      const curTeam = nextTeams[userId];
-      if (!curTeam) nextTeams[userId] = 'A';
-      else if (curTeam === 'A') nextTeams[userId] = 'B';
-      else delete nextTeams[userId];
-      return { ...cur, teamAssignments: nextTeams };
-    });
-  };
-
-  const applyBalancedTeamsToSlot = (slotId: string, selectedIds: string[]) => {
-    updateSlotDraft(slotId, (cur) => ({
-      ...cur,
-      teamAssignments: splitIntoBalancedTeams(selectedIds),
-    }));
-  };
-
   const updateSlotMinMaxDraft = (
     slotId: string,
     field: 'minParticipants' | 'maxParticipants',
@@ -482,17 +476,24 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     }));
   };
 
+  // Ouvre la popup de prévisualisation SANS modifier le planning tant que l'organisateur ne valide pas
   const handleRunOptimizer = () => {
     if (!canEdit) return;
     const result = generateOptimalSchedule(poll, monthlyOtherGames);
+    setProposedSchedule(result);
+    setActionError(null);
+  };
+
+  const handleConfirmApplyOptimization = () => {
+    if (!canEdit || !proposedSchedule) return;
     const nextDrafts: Record<string, SlotDraft> = {};
 
-    Object.values(result.slotProposals).forEach((prop) => {
+    Object.values(proposedSchedule.slotProposals).forEach((prop) => {
       const base = poll.slots.find((s) => s.id === prop.slotId);
       nextDrafts[prop.slotId] = {
         selectedIds: prop.selectedIds,
         waitlistIds: prop.waitlistIds,
-        teamAssignments: prop.teamAssignments,
+        teamAssignments: {},
         minParticipants: base?.minParticipants ?? poll.minParticipants,
         maxParticipants: base?.maxParticipants ?? poll.maxParticipants,
         trainingType: base?.trainingType ?? poll.type,
@@ -500,9 +501,49 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
     });
 
     setDraftsBySlot(nextDrafts);
-    setOptimizationBanner(result.summary);
+    setOptimizationBanner(proposedSchedule.summary);
+    setProposedSchedule(null);
     setActiveTab('planning');
     setActionError(null);
+  };
+
+  const openMembersModal = () => {
+    if (!canEdit) return;
+    setDraftTargetUserIds(Array.from(new Set(poll.targetUsers || [])));
+    setMembersSearch('');
+    setNotifyAddedMembers(true);
+    setMembersModalError(null);
+    setShowMembersModal(true);
+  };
+
+  const handleSaveTargetUsers = async () => {
+    if (!canEdit || savingMembers) return;
+    if (draftTargetUserIds.length === 0) {
+      setMembersModalError('Sélectionnez au moins un membre concerné pour ce sondage.');
+      return;
+    }
+    setSavingMembers(true);
+    setMembersModalError(null);
+    const prevSet = new Set(poll.targetUsers || []);
+    const addedIds = draftTargetUserIds.filter((id) => !prevSet.has(id));
+    try {
+      await onUpdateTargetUsers(poll.id, draftTargetUserIds);
+      let dmSuffix = '';
+      if (notifyAddedMembers && addedIds.length > 0) {
+        try {
+          const dm = await notifyNewPollMembersByDiscord(poll.id, addedIds);
+          dmSuffix = ` (${dm.sentCount}/${addedIds.length} MP envoyé(s))`;
+        } catch {
+          dmSuffix = ' (échec envoi MP aux nouveaux membres)';
+        }
+      }
+      setShowMembersModal(false);
+      showToast(`Membres du sondage mis à jour${dmSuffix} !`);
+    } catch (err: any) {
+      setMembersModalError(err?.message || 'Impossible de mettre à jour les membres.');
+    } finally {
+      setSavingMembers(false);
+    }
   };
 
   const handleDiscardAllDrafts = () => {
@@ -904,19 +945,19 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
           </div>
         </div>
 
-        {/* Barre d'outils */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
-          {canEdit && (
-            <>
-              <button
-                type="button"
-                onClick={handleRunOptimizer}
-                className="w-full sm:w-auto min-h-[40px] bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-600/20"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Proposer une configuration optimale</span>
-              </button>
+        {/* Barre d'outils (ergonomie structurée mobile 2×2 + ligne desktop) */}
+        {canEdit && (
+          <div className="space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:items-center sm:gap-2 pt-2 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={handleRunOptimizer}
+              className="w-full sm:w-auto min-h-[42px] bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-600/20"
+            >
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span>Proposer une configuration optimale</span>
+            </button>
 
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => {
@@ -926,64 +967,88 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                   setNewSlotMax(poll.maxParticipants);
                   setNewSlotType(poll.type);
                 }}
-                className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
+                className="min-h-[42px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center justify-center gap-1.5 transition active:scale-95"
               >
-                <Plus className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Ajouter un créneau</span>
+                <Plus className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="truncate">
+                  <span className="sm:hidden">Créneau</span>
+                  <span className="hidden sm:inline">Ajouter un créneau</span>
+                </span>
               </button>
-            </>
-          )}
 
-          {canEdit && (
-            <button
-              type="button"
-              disabled={presentOrUncertainIds.length === 0}
-              onClick={() => {
-                setPlanningDmResult(null);
-                setPlanningDmError(null);
-                setShowPlanningDmModal(true);
-              }}
-              title={
-                presentOrUncertainIds.length === 0
-                  ? 'Aucun membre n’a encore répondu Présent ou Indéterminé'
-                  : `Envoyer le détail du planning en MP Discord à ${presentOrUncertainIds.length} membre(s)`
-              }
-              className="min-h-[40px] bg-sky-600/20 hover:bg-sky-600/30 disabled:opacity-45 disabled:cursor-not-allowed text-sky-200 text-xs font-semibold px-3 py-2 rounded-xl border border-sky-500/40 flex items-center gap-1.5 transition active:scale-95"
-            >
-              <Send className="w-3.5 h-3.5 text-sky-400" />
-              <span>Envoyer le planning en MP ({presentOrUncertainIds.length})</span>
-            </button>
-          )}
+              <button
+                type="button"
+                onClick={openMembersModal}
+                className="min-h-[42px] bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-slate-700 flex items-center justify-center gap-1.5 transition active:scale-95"
+                title="Ajouter ou supprimer des membres concernés par ce sondage"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="truncate">
+                  <span className="sm:hidden">Membres ({poll.targetUsers?.length || 0})</span>
+                  <span className="hidden sm:inline">
+                    Gérer les membres ({poll.targetUsers?.length || 0})
+                  </span>
+                </span>
+              </button>
 
-          {canEdit && (
-            <button
-              type="button"
-              disabled={missingResponders.length === 0}
-              onClick={() => {
-                setReminderDmResult(null);
-                setReminderDmError(null);
-                setShowReminderModal(true);
-              }}
-              title={
-                missingResponders.length === 0
-                  ? 'Tous les membres ciblés ont déjà répondu'
-                  : `Relancer les ${missingResponders.length} membre(s) qui n'ont pas encore répondu`
-              }
-              className={`min-h-[40px] text-xs font-medium px-3 py-2 rounded-xl border flex items-center gap-1.5 transition ${
-                missingResponders.length === 0
-                  ? 'bg-slate-900/70 border-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700 active:scale-95'
-              }`}
-            >
-              <Send
-                className={`w-3.5 h-3.5 ${
-                  missingResponders.length === 0 ? 'text-slate-600' : 'text-amber-400'
+              <button
+                type="button"
+                disabled={presentOrUncertainIds.length === 0}
+                onClick={() => {
+                  setPlanningDmResult(null);
+                  setPlanningDmError(null);
+                  setShowPlanningDmModal(true);
+                }}
+                title={
+                  presentOrUncertainIds.length === 0
+                    ? 'Aucun membre n’a encore répondu Présent ou Indéterminé'
+                    : `Envoyer le détail du planning en MP Discord à ${presentOrUncertainIds.length} membre(s)`
+                }
+                className="min-h-[42px] bg-sky-600/20 hover:bg-sky-600/30 disabled:opacity-45 disabled:cursor-not-allowed text-sky-200 text-xs font-semibold px-3 py-2 rounded-xl border border-sky-500/40 flex items-center justify-center gap-1.5 transition active:scale-95"
+              >
+                <Send className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span className="truncate">
+                  <span className="sm:hidden">Planning MP ({presentOrUncertainIds.length})</span>
+                  <span className="hidden sm:inline">
+                    Envoyer le planning en MP ({presentOrUncertainIds.length})
+                  </span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                disabled={missingResponders.length === 0}
+                onClick={() => {
+                  setReminderDmResult(null);
+                  setReminderDmError(null);
+                  setShowReminderModal(true);
+                }}
+                title={
+                  missingResponders.length === 0
+                    ? 'Tous les membres ciblés ont déjà répondu'
+                    : `Relancer les ${missingResponders.length} membre(s) qui n'ont pas encore répondu`
+                }
+                className={`min-h-[42px] text-xs font-medium px-3 py-2 rounded-xl border flex items-center justify-center gap-1.5 transition ${
+                  missingResponders.length === 0
+                    ? 'bg-slate-900/70 border-slate-800 text-slate-500 cursor-not-allowed'
+                    : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700 active:scale-95'
                 }`}
-              />
-              <span>Relancer retardataires ({missingResponders.length})</span>
-            </button>
-          )}
-        </div>
+              >
+                <Send
+                  className={`w-3.5 h-3.5 shrink-0 ${
+                    missingResponders.length === 0 ? 'text-slate-600' : 'text-amber-400'
+                  }`}
+                />
+                <span className="truncate">
+                  <span className="sm:hidden">Relancer ({missingResponders.length})</span>
+                  <span className="hidden sm:inline">
+                    Relancer retardataires ({missingResponders.length})
+                  </span>
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Formulaire inline Ajout de créneau */}
         {canEdit && showAddSlotForm && (
@@ -1205,7 +1270,8 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
 
             const isDirty = Boolean(draftsBySlot[slot.id]);
             const isSavingThis = savingSlotId === slot.id;
-            const activeVoteTab = voteTabBySlot[slot.id] || 'dispo';
+            const totalAvailablePoolCount =
+              unassignedDisponibles.length + unassignedIncertains.length;
 
             const fillPct =
               slotMax > 0 ? Math.min(100, Math.round((slot.selectedIds.length / slotMax) * 100)) : 0;
@@ -1381,17 +1447,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                                 />
                               </label>
                             </div>
-
-                            {slot.selectedIds.length >= 2 && !isCancelled && (
-                              <button
-                                type="button"
-                                onClick={() => applyBalancedTeamsToSlot(slot.id, slot.selectedIds)}
-                                className="text-[11px] bg-slate-800 hover:bg-slate-700 text-indigo-300 px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
-                              >
-                                <Split className="w-3.5 h-3.5" />
-                                <span>Éq. A / B</span>
-                              </button>
-                            )}
                           </div>
 
                           <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2">
@@ -1480,11 +1535,6 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                                 <CheckCircle className="w-3.5 h-3.5" />
                                 Titulaires ({slot.selectedIds.length} / {slotMax})
                               </span>
-                              {canEdit && (
-                                <span className="text-[10px] text-slate-400">
-                                  Tap badge pour A/B
-                                </span>
-                              )}
                             </div>
 
                             <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -1498,43 +1548,26 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                           <div className="space-y-1.5">
                             {slot.selectedIds.map((userId) => {
                               const info = getUserInfo(userId);
-                              const team = slot.teamAssignments?.[userId];
+                              const isUncertain = slot.incertains.includes(userId);
                               return (
                                 <div
                                   key={userId}
-                                  className="min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 flex items-center justify-between gap-2"
+                                  className={`min-h-[44px] rounded-xl px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 border ${
+                                    isUncertain
+                                      ? 'bg-slate-950/95 border-dashed border-amber-500/45 text-amber-200/80'
+                                      : 'bg-slate-950 border-slate-800 text-slate-200'
+                                  }`}
                                 >
                                   <div className="flex items-center gap-2 min-w-0">
-                                    {canEdit ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => cyclePlayerTeam(slot.id, userId)}
-                                        className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition active:scale-95 shrink-0 ${
-                                          team === 'A'
-                                            ? 'bg-blue-600/30 text-blue-300 border-blue-500/50'
-                                            : team === 'B'
-                                            ? 'bg-rose-600/30 text-rose-300 border-rose-500/50'
-                                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                                        }`}
-                                        title="Basculer Équipe A / B / Aucune"
-                                      >
-                                        {team ? `Éq.${team}` : 'Éq.'}
-                                      </button>
-                                    ) : (
-                                      team && (
-                                        <span
-                                          className={`text-[10px] font-bold px-2 py-0.5 rounded-lg shrink-0 ${
-                                            team === 'A'
-                                              ? 'bg-blue-600/30 text-blue-300 border border-blue-500/40'
-                                              : 'bg-rose-600/30 text-rose-300 border border-rose-500/40'
-                                          }`}
-                                        >
-                                          Éq.{team}
-                                        </span>
-                                      )
-                                    )}
-                                    <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
+                                    <div className={isUncertain ? 'opacity-70' : ''}>
+                                      <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
+                                    </div>
                                     <span className="truncate font-medium">{info.name}</span>
+                                    {isUncertain && (
+                                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/40 shrink-0">
+                                        ? Incertain
+                                      </span>
+                                    )}
                                     {renderQuotaBadge(userId)}
                                   </div>
 
@@ -1626,162 +1659,81 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                             </div>
                           </div>
 
-                          {/* Disponibles à placer */}
-                          {canEdit && !isCancelled && unassignedDisponibles.length > 0 && (
-                            <div className="pt-3 border-t border-slate-800 space-y-2">
-                              <span className="text-xs font-semibold text-indigo-300 block">
-                                Disponibles à placer ({unassignedDisponibles.length})
+                          {/* Disponibles & Incertains réunis (incertains sombres + bordure ambre pointillée) */}
+                          <div className="pt-3 border-t border-slate-800 space-y-2">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="font-semibold text-emerald-300">
+                                Disponibles à placer ({totalAvailablePoolCount})
                               </span>
+                              {unassignedIncertains.length > 0 && (
+                                <span className="text-[10px] text-amber-300/90">
+                                  dont {unassignedIncertains.length} incertain(s)
+                                </span>
+                              )}
+                            </div>
 
+                            {totalAvailablePoolCount > 0 ? (
                               <div className="space-y-1.5">
-                                {unassignedDisponibles.map((userId) => {
+                                {[...unassignedDisponibles, ...unassignedIncertains].map((userId) => {
                                   const info = getUserInfo(userId);
+                                  const isUnc = unassignedIncertains.includes(userId);
                                   return (
                                     <div
                                       key={userId}
-                                      className="min-h-[44px] bg-slate-950 border border-indigo-500/25 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 flex items-center justify-between gap-2"
+                                      className={`rounded-xl px-2.5 py-2 text-xs flex flex-col xs:flex-row sm:flex-row sm:items-center justify-between gap-2 border ${
+                                        isUnc
+                                          ? 'bg-slate-950/95 border-dashed border-amber-500/50 text-slate-400'
+                                          : 'bg-emerald-950/25 border-emerald-500/35 text-white'
+                                      }`}
+                                      title={isUnc ? 'A répondu Incertain sur ce créneau' : 'Disponible'}
                                     >
                                       <div className="flex items-center gap-2 min-w-0">
-                                        <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
-                                        <span className="truncate font-medium">{info.name}</span>
+                                        {isUnc ? (
+                                          <span className="w-2 h-2 rounded-full border border-amber-400 shrink-0" />
+                                        ) : (
+                                          <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 shadow shadow-emerald-400/50" />
+                                        )}
+                                        <div className={isUnc ? 'opacity-60 grayscale shrink-0' : 'shrink-0'}>
+                                          <UserAvatar avatar={info.avatar} name={info.name} size="sm" />
+                                        </div>
+                                        <span className={`truncate font-medium ${isUnc ? 'italic' : ''}`}>
+                                          {info.name}
+                                        </span>
+                                        {isUnc && (
+                                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/40 shrink-0">
+                                            ? Incertain
+                                          </span>
+                                        )}
                                         {renderQuotaBadge(userId)}
                                       </div>
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => moveToSelected(slot.id, userId)}
-                                          className="text-[11px] bg-emerald-950/80 hover:bg-emerald-700 text-emerald-300 hover:text-white border border-emerald-700/60 px-2.5 py-1.5 rounded-lg transition active:scale-95"
-                                        >
-                                          + Titulaire
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => moveToWaitlist(slot.id, userId)}
-                                          className="text-[11px] bg-amber-950/80 hover:bg-amber-700 text-amber-300 hover:text-white border border-amber-700/60 px-2 py-1.5 rounded-lg transition active:scale-95"
-                                        >
-                                          + Attente
-                                        </button>
-                                      </div>
+                                      {canEdit && !isCancelled && (
+                                        <div className="grid grid-cols-2 sm:flex items-center gap-1.5 shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => moveToSelected(slot.id, userId)}
+                                            className="min-h-[34px] text-[11px] bg-emerald-950/80 hover:bg-emerald-700 text-emerald-300 hover:text-white border border-emerald-700/60 px-2.5 py-1.5 rounded-lg transition active:scale-95"
+                                          >
+                                            + Titulaire
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => moveToWaitlist(slot.id, userId)}
+                                            className="min-h-[34px] text-[11px] bg-amber-950/80 hover:bg-amber-700 text-amber-300 hover:text-white border border-amber-700/60 px-2.5 py-1.5 rounded-lg transition active:scale-95"
+                                          >
+                                            + Attente
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
                                   );
                                 })}
                               </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* ZONE 3 : Récapitulatif compact des votes par onglets */}
-                      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3 space-y-2.5">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setVoteTabBySlot((prev) => ({ ...prev, [slot.id]: 'dispo' }))
-                            }
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition border ${
-                              activeVoteTab === 'dispo'
-                                ? 'bg-emerald-950/70 border-emerald-600/60 text-emerald-300'
-                                : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            🟢 Dispo ({slot.disponibles.length})
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setVoteTabBySlot((prev) => ({ ...prev, [slot.id]: 'incertain' }))
-                            }
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition border ${
-                              activeVoteTab === 'incertain'
-                                ? 'bg-amber-950/70 border-amber-600/60 text-amber-300'
-                                : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            🟡 Incertains ({slot.incertains.length})
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setVoteTabBySlot((prev) => ({ ...prev, [slot.id]: 'indispo' }))
-                            }
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition border ${
-                              activeVoteTab === 'indispo'
-                                ? 'bg-red-950/70 border-red-600/60 text-red-300'
-                                : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            🔴 Indispo ({slot.indisponibles.length})
-                          </button>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5">
-                          {activeVoteTab === 'dispo' &&
-                            (slot.disponibles.length > 0 ? (
-                              slot.disponibles.map((id) => {
-                                const info = getUserInfo(id);
-                                return (
-                                  <span
-                                    key={id}
-                                    className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-full px-2.5 py-1 text-xs text-slate-200"
-                                  >
-                                    <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                    <span>{info.name}</span>
-                                  </span>
-                                );
-                              })
                             ) : (
-                              <span className="text-xs text-slate-500 italic">Aucun disponible</span>
-                            ))}
-
-                          {activeVoteTab === 'incertain' &&
-                            (slot.incertains.length > 0 ? (
-                              slot.incertains.map((id) => {
-                                const info = getUserInfo(id);
-                                const canPromoteIncertain =
-                                  canEdit && !isCancelled && unassignedIncertains.includes(id);
-                                return (
-                                  <span
-                                    key={id}
-                                    className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-full px-2.5 py-1 text-xs text-slate-200"
-                                  >
-                                    <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                    <span>{info.name}</span>
-                                    {canPromoteIncertain && (
-                                      <button
-                                        type="button"
-                                        onClick={() => moveToSelected(slot.id, id)}
-                                        className="text-[10px] text-emerald-300 hover:text-emerald-200 font-semibold ml-1"
-                                      >
-                                        + Titulaire
-                                      </button>
-                                    )}
-                                  </span>
-                                );
-                              })
-                            ) : (
-                              <span className="text-xs text-slate-500 italic">Aucun incertain</span>
-                            ))}
-
-                          {activeVoteTab === 'indispo' &&
-                            (slot.indisponibles.length > 0 ? (
-                              slot.indisponibles.map((id) => {
-                                const info = getUserInfo(id);
-                                return (
-                                  <span
-                                    key={id}
-                                    className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-full px-2.5 py-1 text-xs text-slate-400"
-                                  >
-                                    <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
-                                    <span>{info.name}</span>
-                                  </span>
-                                );
-                              })
-                            ) : (
-                              <span className="text-xs text-slate-500 italic">Aucun indisponible</span>
-                            ))}
+                              <p className="text-xs text-slate-500 italic py-2 text-center">
+                                Aucun autre joueur disponible ou incertain
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -2334,6 +2286,354 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
           </div>
         </div>
       )}
+
+      {/* Popup prévisualisation : Proposition de configuration optimale */}
+      {proposedSchedule && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-slate-900 border border-indigo-500/40 rounded-2xl p-5 sm:p-6 max-w-2xl w-full shadow-2xl space-y-4 animate-modal-pop max-h-[90vh] flex flex-col"
+          >
+            <div className="flex items-start justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-950/80 border border-indigo-600/50 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-5 h-5 text-indigo-300" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-base text-white">
+                    Proposition de configuration optimale
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Aucune modification n&apos;est encore appliquée. Vérifiez puis validez ci-dessous.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProposedSchedule(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                aria-label="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs shrink-0">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                <p className="text-[11px] text-slate-400">Séances planifiées</p>
+                <p className="text-base font-bold text-emerald-400">
+                  {proposedSchedule.summary.plannedSessionsCount}
+                </p>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                <p className="text-[11px] text-slate-400">Créneaux viables</p>
+                <p className="text-base font-bold text-white">
+                  {proposedSchedule.summary.viableSlotsCount}
+                </p>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 col-span-2 sm:col-span-1">
+                <p className="text-[11px] text-slate-400">Objectifs satisfaits</p>
+                <p className="text-base font-bold text-indigo-300">
+                  {proposedSchedule.summary.satisfiedPlayersCount} /{' '}
+                  {proposedSchedule.summary.totalRequestingPlayers}
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto space-y-2.5 pr-1 flex-1">
+              {poll.slots
+                .filter((s) => !s.cancelled)
+                .sort(
+                  (a, b) =>
+                    a.dateStr.localeCompare(b.dateStr) || a.startTime.localeCompare(b.startTime)
+                )
+                .map((slot) => {
+                  const prop = proposedSchedule.slotProposals[slot.id];
+                  const selectedIds = prop?.selectedIds || [];
+                  const waitlistIds = prop?.waitlistIds || [];
+                  const slotType = slot.trainingType || poll.type;
+                  const minReq = slot.minParticipants ?? poll.minParticipants;
+                  const viable = selectedIds.length >= minReq;
+                  return (
+                    <div
+                      key={slot.id}
+                      className={`rounded-xl border p-3 text-xs space-y-2 ${
+                        viable
+                          ? 'bg-slate-950/90 border-emerald-700/40'
+                          : 'bg-slate-950/60 border-slate-800 opacity-80'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-bold text-white">
+                            {slot.dayName} {formatShortFRDate(slot.dateStr)}
+                          </span>
+                          <span className="font-mono text-indigo-300">
+                            ({slot.startTime}–{slot.endTime})
+                          </span>
+                          <span
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${TRAINING_TYPE_BADGE_CLASSES[slotType] || 'bg-indigo-900/40 text-indigo-300 border-indigo-700/40'}`}
+                          >
+                            {TRAINING_TYPE_LABELS[slotType] || slotType}
+                          </span>
+                        </div>
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                            viable
+                              ? 'bg-emerald-500/15 text-emerald-300'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {selectedIds.length} titulaire(s)
+                        </span>
+                      </div>
+
+                      {selectedIds.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedIds.map((uid) => {
+                            const info = getUserInfo(uid);
+                            return (
+                              <span
+                                key={uid}
+                                className="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-full px-2.5 py-0.5 text-[11px] text-slate-200"
+                              >
+                                <UserAvatar avatar={info.avatar} name={info.name} size="xs" />
+                                <span>{info.name}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-500 italic">
+                          Créneau non retenu (effectif insuffisant)
+                        </p>
+                      )}
+
+                      {waitlistIds.length > 0 && (
+                        <p className="text-[11px] text-amber-300/90">
+                          ⏳ Attente : {waitlistIds.map((id) => getUserInfo(id).name).join(', ')}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 pt-3 border-t border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => setProposedSchedule(null)}
+                className="px-4 py-2.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-xl transition"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmApplyOptimization}
+                className="px-4 py-2.5 text-xs font-semibold text-white bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 rounded-xl transition flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-600/20"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Valider cette proposition</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale : Ajouter / Supprimer des membres concernés */}
+      {showMembersModal && (() => {
+        const search = membersSearch.trim().toLowerCase();
+        const currentIdsSet = new Set(draftTargetUserIds);
+        const currentMembers = draftTargetUserIds
+          .map((uid) => {
+            const gm = guildMembers.find((m) => m.discordId === uid);
+            const info = getUserInfo(uid);
+            return {
+              discordId: uid,
+              displayName: gm?.displayName || info.name,
+              avatarUrl: gm?.avatarUrl || info.avatar,
+              roleNames: gm?.roleNames || info.roles,
+            };
+          })
+          .sort((a, b) => a.displayName.localeCompare(b.displayName, 'fr'));
+
+        const availableMembers = guildMembers
+          .filter((m) => {
+            if (currentIdsSet.has(m.discordId)) return false;
+            if (!search) return true;
+            return (
+              m.displayName.toLowerCase().includes(search) ||
+              m.username.toLowerCase().includes(search) ||
+              m.roleNames.some((r) => r.toLowerCase().includes(search))
+            );
+          })
+          .sort((a, b) => a.displayName.localeCompare(b.displayName, 'fr'));
+
+        const prevSet = new Set(poll.targetUsers || []);
+        const newlyAddedCount = draftTargetUserIds.filter((id) => !prevSet.has(id)).length;
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-5 sm:p-6 max-w-2xl w-full shadow-2xl space-y-4 animate-modal-pop max-h-[90vh] flex flex-col"
+            >
+              <div className="flex items-start justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-950/70 border border-emerald-700/60 flex items-center justify-center shrink-0">
+                    <UserPlus className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-base text-white">
+                      Gérer les membres du sondage
+                    </h4>
+                    <p className="text-xs text-slate-400">
+                      Cliquez sur un membre pour l&apos;ajouter ou le retirer de ce sondage.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMembersModal(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  aria-label="Fermer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 overflow-y-auto flex-1 pr-0.5">
+                {/* Colonne gauche : Ajouter */}
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2.5 flex flex-col">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-200">
+                    <span>Membres du serveur ({availableMembers.length})</span>
+                  </div>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={membersSearch}
+                      onChange={(e) => setMembersSearch(e.target.value)}
+                      placeholder="Rechercher un pseudo ou rôle..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                    {availableMembers.length === 0 ? (
+                      <p className="text-[11px] text-slate-500 italic text-center py-6">
+                        Aucun autre membre trouvé.
+                      </p>
+                    ) : (
+                      availableMembers.map((m) => (
+                        <button
+                          key={m.discordId}
+                          type="button"
+                          onClick={() =>
+                            setDraftTargetUserIds((prev) => [...prev, m.discordId])
+                          }
+                          className="w-full min-h-[40px] p-2 rounded-lg bg-slate-900 hover:bg-indigo-950/50 border border-slate-800 hover:border-indigo-500/50 text-left flex items-center justify-between gap-2 transition"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <UserAvatar avatar={m.avatarUrl} name={m.displayName} size="xs" />
+                            <span className="text-xs text-white truncate">{m.displayName}</span>
+                          </div>
+                          <UserPlus className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Colonne droite : Membres concernés */}
+                <div className="bg-slate-950/80 border border-emerald-800/40 rounded-xl p-3 space-y-2.5 flex flex-col">
+                  <div className="flex items-center justify-between text-xs font-semibold text-emerald-300">
+                    <span>Membres concernés ({currentMembers.length})</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {currentMembers.length === 0 ? (
+                      <p className="text-[11px] text-slate-500 italic text-center py-6">
+                        Aucun membre sélectionné.
+                      </p>
+                    ) : (
+                      currentMembers.map((m) => (
+                        <button
+                          key={m.discordId}
+                          type="button"
+                          onClick={() =>
+                            setDraftTargetUserIds((prev) =>
+                              prev.filter((id) => id !== m.discordId)
+                            )
+                          }
+                          className="w-full min-h-[40px] p-2 rounded-lg bg-emerald-950/25 hover:bg-red-950/35 border border-emerald-700/40 hover:border-red-500/50 text-left flex items-center justify-between gap-2 transition group"
+                          title="Cliquer pour retirer ce membre"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <UserAvatar avatar={m.avatarUrl} name={m.displayName} size="xs" />
+                            <span className="text-xs text-white truncate">{m.displayName}</span>
+                          </div>
+                          <UserMinus className="w-3.5 h-3.5 text-emerald-400 group-hover:text-red-400 shrink-0" />
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {newlyAddedCount > 0 && (
+                <label className="flex items-center gap-2 text-xs text-slate-200 bg-indigo-950/30 border border-indigo-700/40 rounded-xl px-3 py-2.5 cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={notifyAddedMembers}
+                    onChange={(e) => setNotifyAddedMembers(e.target.checked)}
+                    className="rounded text-indigo-600 bg-slate-900 border-slate-700"
+                  />
+                  <span>
+                    Envoyer un MP Discord avec le lien du sondage aux{' '}
+                    <strong>{newlyAddedCount} nouveau(x) membre(s)</strong> ajouté(s)
+                  </span>
+                </label>
+              )}
+
+              {membersModalError && (
+                <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center gap-2 shrink-0">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{membersModalError}</span>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 pt-2 border-t border-slate-800 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowMembersModal(false)}
+                  className="px-4 py-2.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-xl transition"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={savingMembers}
+                  onClick={handleSaveTargetUsers}
+                  className="px-4 py-2.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded-xl transition flex items-center justify-center gap-1.5"
+                >
+                  {savingMembers ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Enregistrement...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Enregistrer les membres</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

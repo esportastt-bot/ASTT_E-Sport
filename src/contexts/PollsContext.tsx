@@ -58,6 +58,7 @@ interface PollsContextType {
       minParticipants: number;
       maxParticipants: number;
       status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+      targetUsers: string[];
     }>
   ) => Promise<void>;
   saveVotes: (
@@ -479,6 +480,7 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       minParticipants: number;
       maxParticipants: number;
       status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+      targetUsers: string[];
     }>
   ): Promise<void> => {
     requireAuth();

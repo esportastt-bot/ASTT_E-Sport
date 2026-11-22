@@ -65,7 +65,8 @@ async function postNotifyChunk(
 async function callNotifyEndpoint(
   endpoint: string,
   pollId: string,
-  expectedRecipientIds?: string[]
+  expectedRecipientIds?: string[],
+  forceSubset = false
 ): Promise<DiscordNotifyResult> {
   const currentUser = auth.currentUser;
   if (!currentUser) {
@@ -77,7 +78,11 @@ async function callNotifyEndpoint(
     ? Array.from(new Set(expectedRecipientIds.filter(Boolean)))
     : undefined;
 
-  if (!uniqueIds || uniqueIds.length <= CHUNK_SIZE) {
+  if (forceSubset && (!uniqueIds || uniqueIds.length === 0)) {
+    return { totalAuthorized: 0, sentCount: 0, failedCount: 0, failed: [] };
+  }
+
+  if (!uniqueIds || (!forceSubset && uniqueIds.length <= CHUNK_SIZE)) {
     const res = await postNotifyChunk(endpoint, idToken, pollId);
     return {
       totalAuthorized: res.totalAuthorized,
@@ -95,7 +100,9 @@ async function callNotifyEndpoint(
   for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
     const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
     const res = await postNotifyChunk(endpoint, idToken, pollId, chunk);
-    totalAuthorized = Math.max(totalAuthorized, res.totalAuthorized);
+    totalAuthorized = forceSubset
+      ? uniqueIds.length
+      : Math.max(totalAuthorized, res.totalAuthorized);
     sentCount += res.sentCount;
     failedCount += res.failedCount;
     failed.push(...res.failed);
@@ -115,6 +122,14 @@ export async function notifyPollCreatedByDiscord(
   targetUserIds: string[]
 ): Promise<DiscordNotifyResult> {
   return callNotifyEndpoint('/api/discord/notify/poll-created', pollId, targetUserIds);
+}
+
+/** Envoie un MP Discord avec le lien direct du sondage uniquement aux nouveaux membres ajoutés */
+export async function notifyNewPollMembersByDiscord(
+  pollId: string,
+  addedUserIds: string[]
+): Promise<DiscordNotifyResult> {
+  return callNotifyEndpoint('/api/discord/notify/poll-created', pollId, addedUserIds, true);
 }
 
 /** Envoie en MP Discord le planning décidé uniquement aux membres ayant répondu Présent ou Indéterminé */

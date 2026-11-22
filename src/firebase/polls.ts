@@ -582,6 +582,7 @@ export async function updatePoll(
     minParticipants: number;
     maxParticipants: number;
     status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+    targetUsers: string[];
   }>
 ): Promise<void> {
   const firestoreData: Record<string, any> = { updated_at: serverTimestamp() };
@@ -594,5 +595,6 @@ export async function updatePoll(
   if (changes.minParticipants !== undefined) firestoreData.min_participants = changes.minParticipants;
   if (changes.maxParticipants !== undefined) firestoreData.max_participants = changes.maxParticipants;
   if (changes.status !== undefined) firestoreData.status = changes.status;
+  if (changes.targetUsers !== undefined) firestoreData.target_user_ids = changes.targetUsers;
   await updateDoc(doc(db, POLLS_COL, pollId), firestoreData);
 }
