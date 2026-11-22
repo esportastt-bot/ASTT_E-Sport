@@ -20,6 +20,7 @@ import {
 } from '../../utils/dateUtils';
 
 const TRAINING_TYPES: TrainingType[] = ['ASTT', 'MIX', 'SCRIM', 'ENTRAINEMENT'];
+const PARTICIPANT_COUNT_OPTIONS = [2, 3, 4, 5, 6, 7, 8, 9, 10];
 const MONTHS_FR = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
   'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
@@ -1049,39 +1050,51 @@ export const CreatePollWizard: React.FC<CreatePollWizardProps> = ({
                               </label>
                               <label className="flex items-center gap-1 text-slate-300">
                                 <span>Min</span>
-                                <input
-                                  type="number"
-                                  min={2}
-                                  max={20}
+                                <select
                                   value={dayMinVal}
                                   onChange={(e) =>
                                     applyDayParticipants(
                                       dayIdx,
                                       'minParticipants',
-                                      parseInt(e.target.value, 10) || 2
+                                      Number(e.target.value)
                                     )
                                   }
-                                  className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
+                                  className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono focus:outline-none focus:border-indigo-500"
                                   title="Appliquer ce minimum à tous les créneaux de ce jour"
-                                />
+                                >
+                                  {(PARTICIPANT_COUNT_OPTIONS.includes(dayMinVal)
+                                    ? PARTICIPANT_COUNT_OPTIONS
+                                    : [...PARTICIPANT_COUNT_OPTIONS, dayMinVal].sort((a, b) => a - b)
+                                  ).map((n) => (
+                                    <option key={n} value={n} className="bg-slate-950 text-white">
+                                      {n}
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                               <label className="flex items-center gap-1 text-slate-300">
                                 <span>Max</span>
-                                <input
-                                  type="number"
-                                  min={2}
-                                  max={20}
+                                <select
                                   value={dayMaxVal}
                                   onChange={(e) =>
                                     applyDayParticipants(
                                       dayIdx,
                                       'maxParticipants',
-                                      parseInt(e.target.value, 10) || 8
+                                      Number(e.target.value)
                                     )
                                   }
-                                  className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono"
+                                  className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono focus:outline-none focus:border-indigo-500"
                                   title="Appliquer ce maximum à tous les créneaux de ce jour"
-                                />
+                                >
+                                  {(PARTICIPANT_COUNT_OPTIONS.includes(dayMaxVal)
+                                    ? PARTICIPANT_COUNT_OPTIONS
+                                    : [...PARTICIPANT_COUNT_OPTIONS, dayMaxVal].sort((a, b) => a - b)
+                                  ).map((n) => (
+                                    <option key={n} value={n} className="bg-slate-950 text-white">
+                                      {n}
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                             </div>
                           )}

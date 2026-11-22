@@ -83,6 +83,7 @@ interface OrganizerCockpitScreenProps {
 }
 
 const TRAINING_TYPES: TrainingType[] = ['ASTT', 'MIX', 'SCRIM', 'ENTRAINEMENT'];
+const PARTICIPANT_COUNT_OPTIONS = [2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 interface SlotDraft {
   selectedIds: string[];
@@ -1102,25 +1103,37 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
             </div>
             <div className="space-y-1">
               <label className="text-slate-400 block">Min</label>
-              <input
-                type="number"
-                min={2}
-                max={20}
+              <select
                 value={newSlotMin}
-                onChange={(e) => setNewSlotMin(parseInt(e.target.value, 10) || 2)}
-                className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
-              />
+                onChange={(e) => setNewSlotMin(Number(e.target.value))}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-indigo-500"
+              >
+                {(PARTICIPANT_COUNT_OPTIONS.includes(newSlotMin)
+                  ? PARTICIPANT_COUNT_OPTIONS
+                  : [...PARTICIPANT_COUNT_OPTIONS, newSlotMin].sort((a, b) => a - b)
+                ).map((n) => (
+                  <option key={n} value={n} className="bg-slate-900 text-white">
+                    {n}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1">
               <label className="text-slate-400 block">Max</label>
-              <input
-                type="number"
-                min={2}
-                max={20}
+              <select
                 value={newSlotMax}
-                onChange={(e) => setNewSlotMax(parseInt(e.target.value, 10) || 8)}
-                className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
-              />
+                onChange={(e) => setNewSlotMax(Number(e.target.value))}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-indigo-500"
+              >
+                {(PARTICIPANT_COUNT_OPTIONS.includes(newSlotMax)
+                  ? PARTICIPANT_COUNT_OPTIONS
+                  : [...PARTICIPANT_COUNT_OPTIONS, newSlotMax].sort((a, b) => a - b)
+                ).map((n) => (
+                  <option key={n} value={n} className="bg-slate-900 text-white">
+                    {n}
+                  </option>
+                ))}
+              </select>
             </div>
             <button
               type="submit"
@@ -1414,37 +1427,49 @@ export const OrganizerCockpitScreen: React.FC<OrganizerCockpitScreenProps> = ({
                               </label>
                               <label className="flex items-center gap-1 text-slate-300">
                                 <span className="text-slate-400">Min</span>
-                                <input
-                                  type="number"
-                                  min={2}
-                                  max={20}
+                                <select
                                   value={slotMin}
                                   onChange={(e) =>
                                     updateSlotMinMaxDraft(
                                       slot.id,
                                       'minParticipants',
-                                      parseInt(e.target.value, 10) || 2
+                                      Number(e.target.value)
                                     )
                                   }
-                                  className="w-11 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-center text-white font-mono"
-                                />
+                                  className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono focus:outline-none focus:border-indigo-500"
+                                >
+                                  {(PARTICIPANT_COUNT_OPTIONS.includes(slotMin)
+                                    ? PARTICIPANT_COUNT_OPTIONS
+                                    : [...PARTICIPANT_COUNT_OPTIONS, slotMin].sort((a, b) => a - b)
+                                  ).map((n) => (
+                                    <option key={n} value={n} className="bg-slate-900 text-white">
+                                      {n}
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                               <label className="flex items-center gap-1 text-slate-300">
                                 <span className="text-slate-400">Max</span>
-                                <input
-                                  type="number"
-                                  min={2}
-                                  max={20}
+                                <select
                                   value={slotMax}
                                   onChange={(e) =>
                                     updateSlotMinMaxDraft(
                                       slot.id,
                                       'maxParticipants',
-                                      parseInt(e.target.value, 10) || 8
+                                      Number(e.target.value)
                                     )
                                   }
-                                  className="w-11 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-center text-white font-mono"
-                                />
+                                  className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-white font-mono focus:outline-none focus:border-indigo-500"
+                                >
+                                  {(PARTICIPANT_COUNT_OPTIONS.includes(slotMax)
+                                    ? PARTICIPANT_COUNT_OPTIONS
+                                    : [...PARTICIPANT_COUNT_OPTIONS, slotMax].sort((a, b) => a - b)
+                                  ).map((n) => (
+                                    <option key={n} value={n} className="bg-slate-900 text-white">
+                                      {n}
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                             </div>
                           </div>
