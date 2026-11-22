@@ -18,6 +18,7 @@ interface DashboardScreenProps {
   currentUser: UserProfile;
   polls: Poll[];
   loading?: boolean;
+  loadError?: string | null;
   notificationBanner?: DashboardNotificationBanner | null;
   onDismissNotification?: () => void;
   onSelectPoll: (pollId: string, action: 'vote' | 'cockpit') => void;
@@ -32,6 +33,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   currentUser,
   polls,
   loading = false,
+  loadError = null,
   notificationBanner = null,
   onDismissNotification,
   onSelectPoll,
@@ -180,6 +182,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               Fermer
             </button>
           )}
+        </div>
+      )}
+
+      {/* Erreur de chargement Firestore */}
+      {loadError && (
+        <div className="bg-red-950/60 border border-red-700/60 text-red-200 text-xs rounded-xl p-3 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+          <span>Impossible de charger certains sondages : {loadError}</span>
         </div>
       )}
 

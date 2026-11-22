@@ -218,6 +218,7 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     let cancelled = false;
+    let hadListenerError = false;
 
     const unsubMembers = subscribeToAllMembers((members) => {
       if (!cancelled) setMembersMap(members);
@@ -310,7 +311,9 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
 
         setPolls(mergedPolls);
-        setError(null);
+        if (!hadListenerError) {
+          setError(null);
+        }
         setLoadedForUid(firebaseUser.uid);
 
         for (const poll of firestorePolls) {
@@ -393,6 +396,7 @@ export const PollsProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       },
       (err) => {
         if (cancelled) return;
+        hadListenerError = true;
         setError(err.message);
         setLoadedForUid(firebaseUser.uid);
       }

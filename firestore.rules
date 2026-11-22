@@ -24,15 +24,6 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/polls/$(pollId)).data.status == 'OPEN';
     }
 
-    function canReadPollDoc(data) {
-      return isAdmin() || (
-        isLoggedIn() && (
-          data.created_by == request.auth.uid ||
-          (data.target_user_ids is list && request.auth.uid in data.target_user_ids)
-        )
-      );
-    }
-
     function isPollCreatorBefore(pollId) {
       return isLoggedIn() &&
         exists(/databases/$(database)/documents/polls/$(pollId)) &&
@@ -51,10 +42,7 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/polls/$(pollId)) &&
         (
           get(/databases/$(database)/documents/polls/$(pollId)).data.created_by == request.auth.uid ||
-          (
-            get(/databases/$(database)/documents/polls/$(pollId)).data.target_user_ids is list &&
-            request.auth.uid in get(/databases/$(database)/documents/polls/$(pollId)).data.target_user_ids
-          )
+          request.auth.uid in get(/databases/$(database)/documents/polls/$(pollId)).data.target_user_ids
         )
       );
     }
@@ -74,7 +62,12 @@ service cloud.firestore {
 
     // ── Polls ─────────────────────────────────────────────────────────────────
     match /polls/{pollId} {
-      allow read: if canReadPollDoc(resource.data);
+      allow read: if isAdmin() || (
+        isLoggedIn() && (
+          resource.data.created_by == request.auth.uid ||
+          request.auth.uid in resource.data.target_user_ids
+        )
+      );
       allow create: if isLoggedIn() && request.resource.data.created_by == request.auth.uid;
       allow update, delete: if isAdmin() || (isLoggedIn() && resource.data.created_by == request.auth.uid);
 

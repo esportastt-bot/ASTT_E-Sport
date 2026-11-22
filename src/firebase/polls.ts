@@ -272,7 +272,7 @@ export function subscribeToPollsList(
   let hasCreatedSnap = false;
 
   const emitMerged = async () => {
-    if (!hasTargetedSnap && !hasCreatedSnap) return;
+    if (!hasTargetedSnap || !hasCreatedSnap) return;
     try {
       const merged = new Map<string, QueryDocumentSnapshot<DocumentData>>();
       targetedDocs.forEach((d, id) => merged.set(id, d));
@@ -303,6 +303,7 @@ export function subscribeToPollsList(
       console.warn('Firestore snapshot target_user_ids error:', err.message);
       hasTargetedSnap = true;
       onError?.(err);
+      void emitMerged();
     }
   );
 
@@ -318,6 +319,7 @@ export function subscribeToPollsList(
       console.warn('Firestore snapshot created_by error:', err.message);
       hasCreatedSnap = true;
       onError?.(err);
+      void emitMerged();
     }
   );
 

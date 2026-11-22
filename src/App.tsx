@@ -23,6 +23,7 @@ export function App() {
     membersMap,
     voterNames,
     loading: pollsLoading,
+    error: pollsError,
     createNewPoll,
     removePoll,
     cancelExistingPoll,
@@ -201,6 +202,7 @@ export function App() {
                 currentUser={userProfile}
                 polls={polls}
                 loading={pollsLoading}
+                loadError={pollsError}
                 notificationBanner={dashboardNotice}
                 onDismissNotification={() => setDashboardNotice(null)}
                 onSelectPoll={handleSelectPoll}
